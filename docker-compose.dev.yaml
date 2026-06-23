@@ -1,6 +1,7 @@
 services:
   db:
     image: mysql:8.0
+    container_name: dashdb-container
     env_file:
       - .env
     ports:
@@ -9,10 +10,11 @@ services:
       - mysql_data:/var/lib/mysql
 
   backend:
-    build: ./backend
-    command: python manage.py runserver 0.0.0.0:8000
+    build: ./server
+    container_name: dashserver-container
+    command: python3 manage.py runserver 0.0.0.0:8000
     volumes:
-      - ./backend:/app
+      - ./server:/app
     ports:
       - "8000:8000"
     env_file:
@@ -21,10 +23,11 @@ services:
       - db
 
   frontend:
-    build: ./frontend
+    build: ./client
+    container_name: dashclient-container
     command: npm run dev -- --host
     volumes:
-      - ./frontend:/app
+      - ./client:/app
       - /app/node_modules
     ports:
       - "5173:5173"
@@ -33,6 +36,7 @@ services:
   
   cypress:
     image: cypress/included:13.6.0
+    container_name: dashcypress-container
     depends_on:
       - frontend
     env_file:
