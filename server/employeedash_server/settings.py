@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
 from pathlib import Path
+from datetime import timedelta
 import os
 import pymysql
 from dotenv import load_dotenv
@@ -130,4 +131,11 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME':  timedelta(minutes=15),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'AUTH_COOKIE': 'access_token',
+    'SIGNING_KEY': SECRET_KEY,
+}
 
+JWT_REFRESH_COOKIE = 'refresh_token'
