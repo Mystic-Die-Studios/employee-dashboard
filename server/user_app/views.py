@@ -3,6 +3,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status as s
 from rest_framework_simplejwt.exceptions import TokenError, InvalidToken
+from django.db import transaction
 import os
 import requests
 from .auth_utils import *
@@ -25,38 +26,101 @@ class GitHubCallBackView(APIView):
         code = request.GET.get('code')
         if not code:
             return Response({'error': 'No code provided'}, status=400)
-        response = requests.post(f'https://github.com/login/oauth/access_token', data={
-            'client_id': client_id,
-            'client_secret': client_secret,
-            'code': code
-        })
-        return Response(response.json())
+        
+        github_token = exchange_code_for_token(code)
+        if not github_token:
+            return Response({'error': 'Failed to exchange code for token'}, status=s.HTTP_400_BAD_REQUEST)
+        
+        github_email = get_github_email(github_token)
+        if not github_email:
+            return Response({'error': 'Failed to get GitHub email'}, status=s.HTTP_400_BAD_REQUEST)
+        
+        github_username = get_github_username(github_token)
+        if not github_username:
+            return Response({'error': 'Failed to get GitHub username'}, status=s.HTTP_400_BAD_REQUEST)
+        
+        # TODO: Insert org membership check here before creating the user and issuing JWT tokens
+        user, created = User.objects.get_or_create(
+            email=github_email,
+            defaults={
+                'username': github_email,
+                'github_username': github_username,
+                'role': User.Role.ADMIN
+            })
+        if created:
+            user.set_unusable_password()
+            user.save()
+        access  = create_access_token(user)
+        refresh = create_refresh_token(user)
+        response = Response({'message': 'Logged in as Admin'}, status=s.HTTP_200_OK)
+        return set_token_cookies(response, access, refresh)
 
 # Start User Endpoints
 # ------------------------------------------------------------------------------------------------
-    
+
+# Start Admin Endpoints
+# ------------------------------------------------------------------------------------------------
+
 class CreateAdminUserView(APIView):
-    authentication_classes = [CookieAuthentication]
+    authentication_classes = []
     permission_classes = []
     
     def post(self, request):
         email    = request.data.get('email')
         password = request.data.get('password')
         username = request.data.get('username', email)
+        github_username = request.data.get('github_username')
+        
+        try:
+            with transaction.atomic():
+                user = User.objects.create_user(
+                    email=email, username=username,
+                    password=password, role=User.Role.ADMIN,
+                    github_username=github_username)
+                
+                access  = create_access_token(user)
+                refresh = create_refresh_token(user)
+                response = Response({'message': 'Admin created'}, status=s.HTTP_201_CREATED)
+            return set_token_cookies(response, access, refresh)
 
-        if not email or not password:
-            return Response({'error': 'email and password required'}, status=s.HTTP_400_BAD_REQUEST)
-    # TODO: Insert org membership check here before creating the user and issuing JWT tokens
-        user = User.objects.create_user(
-            email=email, username=username,
-            password=password, role=User.Role.ADMIN,
-        )
-        access  = create_access_token(user)
-        refresh = create_refresh_token(user)
-        return set_token_cookies(
-            Response({'message': 'Admin created'}, status=s.HTTP_201_CREATED),
-            access, refresh,
-        )
+        except Exception as e:
+            return Response({'error': str(e)}, status=s.HTTP_400_BAD_REQUEST)
+
+class AdminLoginView(APIView):
+    authentication_classes = []
+    permission_classes = []
+    
+    def post(self, request):
+        username = request.data.get('email')
+        password = request.data.get('password')
+        if not username or not password:
+            return Response({'error': 'username and password required'}, status=s.HTTP_400_BAD_REQUEST)
+             
+        try:
+           user = User.objects.get(email=username)
+        except User.DoesNotExist:
+            return Response({'error': 'User not found'}, status=s.HTTP_404_NOT_FOUND)
+        
+        if not user.check_password(password):
+            return Response({'error': 'Invalid password'}, status=s.HTTP_401_UNAUTHORIZED)
+        
+        if user.role != User.Role.ADMIN:
+            return Response({'error': 'User is not an admin'}, status=s.HTTP_403_FORBIDDEN)
+        
+        access   = create_access_token(user)
+        refresh  = create_refresh_token(user)
+        response = Response({'message': 'Logged in as Admin'}, status=s.HTTP_200_OK)
+        return set_token_cookies(response, access, refresh) 
+           
+class AdminLogoutView(APIView):
+    authentication_classes = [CookieAuthentication]
+    permission_classes = []
+    
+    def post(self, request):
+        return clear_token_cookies(Response({'message': 'Log out successful'}, status=s.HTTP_200_OK))
+
+# Start Employee Endpoints
+# ------------------------------------------------------------------------------------------------
 
 class CreateEmployeeUserView(APIView):
     authentication_classes = [CookieAuthentication]
@@ -65,12 +129,6 @@ class CreateEmployeeUserView(APIView):
     def post(self, request):
         pass
 
-class AdminLoginView(APIView):
-    authentication_classes = []
-    permission_classes = []
-    
-    def post(self, request):
-        pass
 
 class EmployeeLoginView(APIView):
     authentication_classes = []
@@ -79,12 +137,6 @@ class EmployeeLoginView(APIView):
     def post(self, request):
         pass
 
-class AdminLogoutView(APIView):
-    authentication_classes = [CookieAuthentication]
-    permission_classes = []
-    
-    def post(self, request):
-        pass
 
 class EmployeeLogoutView(APIView):
     authentication_classes = [CookieAuthentication]
@@ -93,6 +145,8 @@ class EmployeeLogoutView(APIView):
     def post(self, request):
         pass
     
+# Refresh Access Token Endpoint
+# ------------------------------------------------------------------------------------------------
 
 class RefreshAccessToken(APIView):
     authentication_classes = []

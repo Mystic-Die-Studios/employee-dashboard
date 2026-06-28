@@ -8,6 +8,7 @@ class User(AbstractUser):
 
     email = models.EmailField(unique=True)
     role  = models.CharField(max_length=20, choices=Role.choices, default=Role.EMPLOYEE)
+    github_username = models.CharField(max_length=39, blank=True, null=True)
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = ['username']
     

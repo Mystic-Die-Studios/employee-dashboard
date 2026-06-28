@@ -24,8 +24,52 @@ def exchange_code_for_token(code):
             'client_secret': os.getenv('GITHUB_CLIENT_SECRET'),
             'code': code,
         },
+        headers={
+            'Accept': 'application/json',
+        },
+        
     )
     return response.json().get('access_token')
+
+def get_github_email(access_token):
+    email_response = requests.get(
+        'https://api.github.com/user/emails',
+        headers={
+            'Accept': 'application/vnd.github+json',
+            'Authorization': f'Bearer {access_token}',
+        },
+        timeout=5,
+    )
+    email_response.raise_for_status()
+
+    email_list = email_response.json()
+    if not isinstance(email_list, list):
+        return None
+
+    for email_item in email_list:
+        if email_item.get('primary') and email_item.get('verified'):
+            return email_item.get('email')
+
+    for email_item in email_list:
+        if email_item.get('verified'):
+            return email_item.get('email')
+
+    return None
+
+def get_github_username(access_token):
+    username_response = requests.get(
+        'https://api.github.com/user',
+        headers={
+            'Accept': 'application/vnd.github+json',
+            'Authorization': f'Bearer {access_token}',
+        },
+        timeout=5,
+    )
+    username_response.raise_for_status()
+    username = username_response.json().get('login')
+    if not username:
+        return None
+    return username
 
 # JWT Helpers
 # ------------------------------------------------------------------------------------------------
@@ -74,29 +118,7 @@ def set_token_cookies(response, access_token, refresh_token):
     )
     return response
 
-# Benched Helpers Check Back In Phase 2
-# ------------------------------------------------------------------------------------------------
-def get_github_email(access_token):
-    email_response = requests.get(
-        'https://api.github.com/user/emails',
-        headers={
-            'Accept': 'application/vnd.github+json',
-            'Authorization': f'Bearer {access_token}',
-        },
-        timeout=5,
-    )
-    email_response.raise_for_status()
-
-    email_list = email_response.json()
-    if not isinstance(email_list, list):
-        return None
-
-    for email_item in email_list:
-        if email_item.get('primary') and email_item.get('verified'):
-            return email_item.get('email')
-
-    for email_item in email_list:
-        if email_item.get('verified'):
-            return email_item.get('email')
-
-    return None
+def clear_token_cookies(response):
+    response.delete_cookie(settings.SIMPLE_JWT['AUTH_COOKIE'])
+    response.delete_cookie(settings.JWT_REFRESH_COOKIE)
+    return response
