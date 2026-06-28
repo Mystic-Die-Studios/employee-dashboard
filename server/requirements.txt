@@ -2,11 +2,11 @@ asgiref==3.11.1
 Django==5.2.15
 django-cors-headers==4.9.0
 djangorestframework==3.17.1
+djangorestframework_simplejwt==5.5.1
 dotenv==0.9.9
+PyJWT==2.13.0
 PyMySQL==1.2.0
 python-dotenv==1.2.2
-rest-framework-simplejwt==0.0.2
-simplejwt==2.0.1
 sqlparse==0.5.5
 typing==3.7.4.3
 typing_extensions==4.15.0
