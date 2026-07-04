@@ -146,7 +146,7 @@ class EmployeeLogoutView(APIView):
         pass
 
 class UserInfoView(APIView):
-    authentication_classes = []
+    authentication_classes = [CookieAuthentication]
     permission_classes = []
 
     def get(self, request):
