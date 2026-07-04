@@ -1,20 +1,16 @@
-import { Outlet } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { Outlet, useLoaderData } from 'react-router-dom';
+import { adminLogout } from './helpers/authHelpers';
 
 export default function App() {
-
-  const [user, setUser] = useState(null);
- 
-  return (
-    <div>
-      <main>
-        <Outlet 
-        context={{
-          user,
-          setUser,
-        }}
-        />
-      </main>
-    </div>
-  );
+    const user = useLoaderData();
+    return (
+        <div>
+            <main>
+                <Outlet context={{ 
+                  user, 
+                  adminLogout 
+                  }} />
+            </main>
+        </div>
+    );
 }
