@@ -144,6 +144,21 @@ class EmployeeLogoutView(APIView):
     
     def post(self, request):
         pass
+
+class UserView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request):
+        user = request.user
+        return Response({
+            'id': user.id,
+            'email': user.email,
+            'username': user.username,
+            'github_username': user.github_username,
+            'role': user.role,
+        })
+
     
 # Refresh Access Token Endpoint
 # ------------------------------------------------------------------------------------------------
@@ -166,4 +181,5 @@ class RefreshAccessToken(APIView):
             response = Response({'access_token': new_access_token}, status=s.HTTP_200_OK)
             return set_token_cookies(response, new_access_token, new_refresh_token)
         except (TokenError, InvalidToken) as e:
-            return Response(str(e), status=s.HTTP_401_UNAUTHORIZED) 
+            return Response(str(e), status=s.HTTP_401_UNAUTHORIZED)
+
