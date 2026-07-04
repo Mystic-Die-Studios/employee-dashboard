@@ -52,7 +52,7 @@ class GitHubCallBackView(APIView):
             user.save()
         access  = create_access_token(user)
         refresh = create_refresh_token(user)
-        response = Response({'message': 'Logged in as Admin'}, status=s.HTTP_200_OK)
+        response = redirect(os.getenv('FRONTEND_URL', 'http://localhost:5173') + '/dashboard')
         return set_token_cookies(response, access, refresh)
 
 # Start User Endpoints
@@ -145,7 +145,7 @@ class EmployeeLogoutView(APIView):
     def post(self, request):
         pass
 
-class UserView(APIView):
+class UserInfoView(APIView):
     authentication_classes = []
     permission_classes = []
 

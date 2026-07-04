@@ -6,5 +6,6 @@ urlpatterns = [
     path('github/callback/', GitHubCallBackView.as_view(), name='github_callback'),
     path('admin/login/', AdminLoginView.as_view(), name='admin_login'),
     path('admin/logout/', AdminLogoutView.as_view(), name='admin_logout'),
-    path('user/', UserView.as_view(), name='user'),
+    path('info/', UserInfoView.as_view(), name='user_info'),
+    path('token/refresh/', RefreshAccessToken.as_view(), name='refresh_token'),
 ]
