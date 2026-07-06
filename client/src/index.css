@@ -1,111 +1,110 @@
-:root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+@import "tailwindcss";
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
-
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
-  color: var(--text);
-  background: var(--bg);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-
-  @media (max-width: 1024px) {
-    font-size: 16px;
-  }
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
-  }
-
-  #social .button-icon {
-    filter: invert(1) brightness(2);
-  }
-}
-
-body {
-  margin: 0;
-}
-
+html,
+body,
 #root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
-  min-height: 100svh;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
+  height: 100%;
 }
 
-h1,
-h2 {
-  font-family: var(--heading);
-  font-weight: 500;
-  color: var(--text-h);
+/* Markdown rendering (no @tailwindcss/typography dependency). */
+.prose-wiki {
+  color: #334155;
+  line-height: 1.7;
+  font-size: 0.95rem;
 }
-
-h1 {
-  font-size: 56px;
-  letter-spacing: -1.68px;
-  margin: 32px 0;
-  @media (max-width: 1024px) {
-    font-size: 36px;
-    margin: 20px 0;
-  }
+.prose-wiki > :first-child {
+  margin-top: 0;
 }
-h2 {
-  font-size: 24px;
-  line-height: 118%;
-  letter-spacing: -0.24px;
-  margin: 0 0 8px;
-  @media (max-width: 1024px) {
-    font-size: 20px;
-  }
+.prose-wiki h1 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #0f172a;
+  margin: 1.2em 0 0.5em;
 }
-p {
-  margin: 0;
+.prose-wiki h2 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #0f172a;
+  margin: 1.1em 0 0.4em;
+  padding-bottom: 0.2em;
+  border-bottom: 1px solid #eef1f5;
 }
-
-code,
-.counter {
-  font-family: var(--mono);
-  display: inline-flex;
+.prose-wiki h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #0f172a;
+  margin: 1em 0 0.3em;
+}
+.prose-wiki p {
+  margin: 0.6em 0;
+}
+.prose-wiki a {
+  color: #7c3aed;
+  text-decoration: underline;
+}
+.prose-wiki ul {
+  list-style: disc;
+  padding-left: 1.4em;
+  margin: 0.6em 0;
+}
+.prose-wiki ol {
+  list-style: decimal;
+  padding-left: 1.4em;
+  margin: 0.6em 0;
+}
+.prose-wiki li {
+  margin: 0.2em 0;
+}
+.prose-wiki code {
+  background: #f1f5f9;
+  padding: 0.1em 0.35em;
   border-radius: 4px;
-  color: var(--text-h);
+  font-size: 0.9em;
+  font-family: ui-monospace, Consolas, monospace;
 }
-
-code {
-  font-size: 15px;
-  line-height: 135%;
-  padding: 4px 8px;
-  background: var(--code-bg);
+.prose-wiki pre {
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 1em;
+  border-radius: 8px;
+  overflow: auto;
+  margin: 0.8em 0;
+}
+.prose-wiki pre code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+}
+.prose-wiki blockquote {
+  border-left: 3px solid #ddd6fe;
+  padding-left: 1em;
+  color: #64748b;
+  margin: 0.8em 0;
+}
+.prose-wiki table {
+  border-collapse: collapse;
+  margin: 0.8em 0;
+  width: 100%;
+  font-size: 0.9em;
+}
+.prose-wiki th,
+.prose-wiki td {
+  border: 1px solid #e2e8f0;
+  padding: 0.4em 0.6em;
+  text-align: left;
+}
+.prose-wiki th {
+  background: #f8fafc;
+}
+.prose-wiki img {
+  max-width: 100%;
+  border-radius: 8px;
+}
+.prose-wiki hr {
+  border: 0;
+  border-top: 1px solid #e2e8f0;
+  margin: 1.2em 0;
+}
+.prose-wiki input[type='checkbox'] {
+  margin-right: 0.4em;
 }
