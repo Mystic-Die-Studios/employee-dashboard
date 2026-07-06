@@ -12,11 +12,15 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 
 from pathlib import Path
 import os
-import pymysql
 from dotenv import load_dotenv
 
 load_dotenv()
-pymysql.install_as_MySQLdb()
+
+# Only pull in the MySQL driver when we're actually using MySQL, so sqlite
+# test/CI runs (DB_ENGINE=sqlite) don't need pymysql installed.
+if os.getenv('DB_ENGINE', 'mysql') != 'sqlite':
+    import pymysql
+    pymysql.install_as_MySQLdb()
 
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -29,9 +33,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv('DJANGO_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DEBUG')
+DEBUG = os.getenv('DEBUG', 'False').lower() in ('true', '1', 'yes')
 
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS').split(',')
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '').split(',')
 
 
 # Application definition
@@ -47,10 +51,13 @@ INSTALLED_APPS = [
     'corsheaders',
     'user_app',
     'documentation_app',
+    'kanban_app',
+    'tracker_app',
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -81,17 +88,26 @@ WSGI_APPLICATION = 'employeedash_server.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
+# Set DB_ENGINE=sqlite for fast local/CI test runs with no MySQL server.
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.mysql',
-        'NAME': os.getenv('DB_NAME'),
-        'USER': os.getenv('DB_USER'),
-        'PASSWORD': os.getenv('DB_PASSWORD'),
-        'HOST': os.getenv('DB_HOST'),
-        'PORT': os.getenv('DB_PORT'),
+if os.getenv('DB_ENGINE', 'mysql') == 'sqlite':
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.mysql',
+            'NAME': os.getenv('DB_NAME'),
+            'USER': os.getenv('DB_USER'),
+            'PASSWORD': os.getenv('DB_PASSWORD'),
+            'HOST': os.getenv('DB_HOST'),
+            'PORT': os.getenv('DB_PORT'),
+        }
+    }
 
 
 # Password validation
@@ -129,3 +145,57 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+
+
+# CORS
+# https://github.com/adamchainz/django-cors-headers
+
+CORS_ALLOWED_ORIGINS = [
+    origin for origin in os.getenv('CORS_ALLOWED_ORIGINS', '').split(',') if origin
+]
+CORS_ALLOW_CREDENTIALS = True
+
+# Cross-origin POSTs (e.g. logout) must have their Origin trusted for CSRF.
+CSRF_TRUSTED_ORIGINS = [
+    origin for origin in os.getenv('CSRF_TRUSTED_ORIGINS', '').split(',') if origin
+]
+
+
+# Session / CSRF cookie security (driven by env so prod can harden them)
+
+SESSION_COOKIE_SECURE = os.getenv('SESSION_COOKIE_SECURE', 'False').lower() in ('true', '1', 'yes')
+SESSION_COOKIE_HTTPONLY = os.getenv('SESSION_COOKIE_HTTPONLY', 'True').lower() in ('true', '1', 'yes')
+CSRF_COOKIE_SECURE = os.getenv('CSRF_COOKIE_SECURE', 'False').lower() in ('true', '1', 'yes')
+
+
+# Django REST Framework — session-cookie auth for the SPA.
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.SessionAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
+}
+
+
+# GitHub OAuth (see user_app.views)
+
+GITHUB_CLIENT_ID = os.getenv('GITHUB_CLIENT_ID', '')
+GITHUB_CLIENT_SECRET = os.getenv('GITHUB_CLIENT_SECRET', '')
+GITHUB_REDIRECT_URI = os.getenv(
+    'GITHUB_REDIRECT_URI', 'http://localhost:8000/api/auth/github/callback/'
+)
+# Blank = allow any GitHub user. Set to an org login to require active membership.
+GITHUB_REQUIRED_ORG = os.getenv('GITHUB_REQUIRED_ORG', '')
+
+# Where the OAuth callback sends the browser after login.
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5173')
+
+
+# Issue Kanban integration (server-to-server bridge; see kanban_app)
+# Full URL to the Kanban app's bridge endpoint, e.g. http://localhost:8001/api/bridge.php
+KANBAN_BRIDGE_URL = os.getenv('KANBAN_BRIDGE_URL', '')
+# Must equal BRIDGE_SECRET in the Kanban app's config.
+KANBAN_BRIDGE_SECRET = os.getenv('KANBAN_BRIDGE_SECRET', '')
