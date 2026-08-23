@@ -38,18 +38,25 @@ class GitHubCallBackView(APIView):
         github_username = get_github_username(github_token)
         if not github_username:
             return Response({'error': 'Failed to get GitHub username'}, status=s.HTTP_400_BAD_REQUEST)
-        
-        # TODO: Insert org membership check here before creating the user and issuing JWT tokens
+
+        github_org = os.getenv('GITHUB_ORG', 'Mystic-Die-Studios')
+        if not is_github_org_member(github_token, github_org):
+            frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5173')
+            return redirect(f'{frontend_url}/?error=not_org_member')
+
+        role = resolve_role(github_username)
         user, created = User.objects.get_or_create(
             email=github_email,
             defaults={
                 'username': github_email,
                 'github_username': github_username,
-                'role': User.Role.ADMIN
+                'role': role,
             })
         if created:
             user.set_unusable_password()
-            user.save()
+        user.github_username = github_username
+        user.role = role
+        user.save()
         access  = create_access_token(user)
         refresh = create_refresh_token(user)
         response = redirect(os.getenv('FRONTEND_URL', 'http://localhost:5173') + '/dashboard')

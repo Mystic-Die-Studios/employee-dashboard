@@ -71,6 +71,29 @@ def get_github_username(access_token):
         return None
     return username
 
+def is_github_org_member(access_token, org):
+    membership_response = requests.get(
+        f'https://api.github.com/user/memberships/orgs/{org}',
+        headers={
+            'Accept': 'application/vnd.github+json',
+            'Authorization': f'Bearer {access_token}',
+        },
+        timeout=5,
+    )
+    if membership_response.status_code != 200:
+        return False
+    return membership_response.json().get('state') == 'active'
+
+def resolve_role(github_username):
+    admin_usernames = {
+        u.strip().lower()
+        for u in os.getenv('ADMIN_GITHUB_USERNAMES', '').split(',')
+        if u.strip()
+    }
+    if github_username.lower() in admin_usernames:
+        return 'admin'
+    return 'employee'
+
 # JWT Helpers
 # ------------------------------------------------------------------------------------------------
 
