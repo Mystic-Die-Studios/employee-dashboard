@@ -10,6 +10,10 @@ __pycache__/
 # Environments
 .env
 .envrc
+
+# GitHub org member exports (contain real names, PII)
+export-Mystic-Die-Studios-*.json
+export-Mystic-Die-Studios-*.csv
 .venv
 env/
 venv/
