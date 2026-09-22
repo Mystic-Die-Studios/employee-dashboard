@@ -124,6 +124,10 @@ if command -v npm >/dev/null 2>&1; then
     export CYPRESS_INSTALL_BINARY=0
     # Keep npm from stalling on a TTY-less terminal waiting to render progress.
     export npm_config_progress=false
+    # cPanel's Node virtualenv exports NODE_ENV=development, and Vite honours an
+    # already-set NODE_ENV. Left alone that ships React's development build:
+    # ~60% larger, slower, and full of dev-only warnings.
+    export NODE_ENV=production
     ( cd "$REPO_DIR/client" && npm ci --no-audit --no-fund --loglevel=http && npm run build )
     cp -Rf "$REPO_DIR/client/dist/." "$APPROOT/frontend/"
 elif [ -d "$REPO_DIR/client/dist" ]; then
@@ -143,14 +147,49 @@ else
     exit 1
 fi
 
+# Django 5.2's floor. Below it, pip cannot resolve requirements.txt at all and
+# fails with a wall of available-version noise that hides the real cause.
+REQUIRED_PYTHON="3.10"
+
 # cPanel creates the virtualenv under ~/virtualenv/<app root>/<python version>/.
-ACTIVATE="$(ls -1 "$VENV_GLOB"/*/bin/activate 2>/dev/null | head -n 1 || true)"
+# Ask each interpreter for its version rather than trusting the directory name,
+# and prefer the newest that can actually run Django.
+find_venv() {
+    local venv ver best="" best_ver=""
+    for venv in "$VENV_GLOB"/*/; do
+        [ -x "$venv/bin/python" ] || continue
+        ver="$("$venv/bin/python" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)" || continue
+        [ -n "$ver" ] || continue
+        version_ge "$ver" "$REQUIRED_PYTHON" || continue
+        if [ -z "$best_ver" ] || version_ge "$ver" "$best_ver"; then
+            best="$venv"
+            best_ver="$ver"
+        fi
+    done
+    [ -n "$best" ] && echo "${best%/}/bin/activate"
+}
+
+ACTIVATE="$(find_venv || true)"
 if [ -z "$ACTIVATE" ]; then
-    echo "ERROR: no virtualenv found under $VENV_GLOB." >&2
-    echo "cPanel names it after the Application root, so this usually means the" >&2
-    echo "Python App root and APPROOT ($APPROOT) disagree." >&2
-    echo "Virtualenvs that do exist:" >&2
-    ls -1d "$HOME"/virtualenv/*/ 2>/dev/null >&2 || echo "  (none)" >&2
+    if [ -n "$(ls -d "$VENV_GLOB"/*/ 2>/dev/null || true)" ]; then
+        echo "ERROR: Python $REQUIRED_PYTHON or newer is required (Django 5.2)." >&2
+        echo "Virtualenvs found for this app, and their versions:" >&2
+        for venv in "$VENV_GLOB"/*/; do
+            [ -x "$venv/bin/python" ] || continue
+            echo "  $("$venv/bin/python" -V 2>&1)  $venv" >&2
+        done
+        echo "" >&2
+        echo "In cPanel > Setup Python App, destroy this application and recreate" >&2
+        echo "it with Python 3.11 or newer. Keep Application root '$(basename "$APPROOT")'" >&2
+        echo "and Application URL 'dashboard.mysticdie.com'. Your .env is outside" >&2
+        echo "the app's virtualenv, so it survives." >&2
+    else
+        echo "ERROR: no virtualenv found under $VENV_GLOB." >&2
+        echo "cPanel names it after the Application root, so this usually means the" >&2
+        echo "Python App root and APPROOT ($APPROOT) disagree." >&2
+        echo "Virtualenvs that do exist:" >&2
+        ls -1d "$HOME"/virtualenv/*/ 2>/dev/null >&2 || echo "  (none)" >&2
+    fi
     exit 1
 fi
 

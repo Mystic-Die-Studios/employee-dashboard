@@ -437,7 +437,7 @@ send GitHub anywhere.
 
 | Field | Value |
 |---|---|
-| Python version | 3.11 or newer |
+| Python version | **3.11 or newer** — Django 5.2 will not install on 3.6/3.9, which cPanel may offer by default |
 | Application root | `employee-dashboard` |
 | Application URL | `dashboard.mysticdie.com` (root, no subpath) |
 | Application startup file | `passenger_wsgi.py` |
@@ -554,6 +554,8 @@ If you get bounced back with `?error=...`, look the code up in
 |---|---|
 | Deploy appears to hang at "Building the frontend" | Cypress downloading its ~200 MB test binary. The script sets `CYPRESS_INSTALL_BINARY=0` to skip it; if running npm by hand, export that first |
 | `ReferenceError: CustomEvent is not defined` from Vite | Node is older than 20.19. Create a Node 20/22 app in **Setup Node.js App** — the deploy script picks the newest qualifying runtime automatically |
+| `No matching distribution found for asgiref==...` | The Python App was created with an old Python. Django 5.2 needs 3.10+; recreate the app with 3.11 or newer |
+| Bundle is ~530 kB instead of ~335 kB | A development build. cPanel's Node virtualenv exports `NODE_ENV=development` and Vite honours it; the deploy script forces `NODE_ENV=production` |
 | Git Version Control: "directory already contains files" | Repository Path is set to the document root. Use `repositories/employee-dashboard` |
 | `could not read Username for 'https://github.com'` | Private repo over https, which cannot prompt for credentials. Use the SSH clone URL plus a deploy key ([step 5a](#5a-give-the-server-read-access-to-the-repository)) |
 | `Host key verification failed` | Run `ssh-keyscan github.com >> ~/.ssh/known_hosts` |
