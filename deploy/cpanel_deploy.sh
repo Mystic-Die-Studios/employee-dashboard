@@ -16,7 +16,8 @@ APPROOT="${APPROOT:-$HOME/employee-dashboard}"
 # than hardcoding a name that only matches one possible setup.
 VENV_GLOB="${VENV_GLOB:-$HOME/virtualenv/$(basename "$APPROOT")}"
 
-say() { printf '\n==> %s\n' "$1"; }
+# Timestamped so that a slow step is distinguishable from a stuck one.
+say() { printf '\n==> [%s] %s\n' "$(date +%H:%M:%S)" "$1"; }
 
 say "Deploying $REPO_DIR -> $APPROOT"
 
@@ -77,7 +78,13 @@ fi
 say "Building the frontend"
 if command -v npm >/dev/null 2>&1; then
     echo "Using npm $(npm -v) from $(dirname "$(command -v npm)")"
-    ( cd "$REPO_DIR/client" && npm ci --no-audit --no-fund && npm run build )
+    # Cypress pulls a ~200 MB binary from a postinstall hook. The server never
+    # runs the E2E suite, and on a shared host that download is the single most
+    # common reason this step appears to hang.
+    export CYPRESS_INSTALL_BINARY=0
+    # Keep npm from stalling on a TTY-less terminal waiting to render progress.
+    export npm_config_progress=false
+    ( cd "$REPO_DIR/client" && npm ci --no-audit --no-fund --loglevel=http && npm run build )
     cp -Rf "$REPO_DIR/client/dist/." "$APPROOT/frontend/"
 elif [ -d "$REPO_DIR/client/dist" ]; then
     echo "npm not found; using the client/dist committed to the repo."
