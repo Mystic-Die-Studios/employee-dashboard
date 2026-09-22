@@ -4,5 +4,6 @@
 # from the cPanel Terminal.
 deployment:
   tasks:
-    - export APPROOT="$HOME/employee-dashboard"
+    # Must match the Application root in cPanel > Setup Python App.
+    - export APPROOT="$HOME/contractor-dashboard"
     - /bin/bash deploy/cpanel_deploy.sh
