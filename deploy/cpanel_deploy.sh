@@ -12,8 +12,27 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APPROOT="${APPROOT:-$HOME/employee-dashboard}"
-# cPanel names the virtualenv after the Application root, so derive it rather
-# than hardcoding a name that only matches one possible setup.
+
+# cPanel names the virtualenv after the Application root. If the expected one is
+# missing but exactly one Python app exists on the account, follow it -- the app
+# often has to be recreated under a new name, and a deploy into the wrong
+# directory succeeds silently while the site keeps serving the old code.
+if [ ! -d "$HOME/virtualenv/$(basename "$APPROOT")" ]; then
+    _venvs=()
+    while read -r _v; do
+        [ -n "$_v" ] && _venvs+=("$_v")
+    done < <(ls -1d "$HOME"/virtualenv/*/ 2>/dev/null || true)
+    if [ "${#_venvs[@]}" -eq 1 ]; then
+        _name="$(basename "${_venvs[0]}")"
+        if [ "$_name" != "$(basename "$APPROOT")" ]; then
+            echo "NOTE: no virtualenv for '$(basename "$APPROOT")'."
+            echo "      Following the only Python app on this account: '$_name'."
+            echo "      Set APPROOT explicitly, or update .cpanel.yml, to silence this."
+            APPROOT="$HOME/$_name"
+        fi
+    fi
+fi
+
 VENV_GLOB="${VENV_GLOB:-$HOME/virtualenv/$(basename "$APPROOT")}"
 
 # Timestamped so that a slow step is distinguishable from a stuck one.
