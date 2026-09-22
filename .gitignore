@@ -226,3 +226,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Deploy artifacts (generated on the host)
+server/staticfiles/
+server/frontend/
+deploy/.env.production

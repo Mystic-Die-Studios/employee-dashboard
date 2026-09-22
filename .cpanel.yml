@@ -1,0 +1,8 @@
+---
+# cPanel > Git Version Control > Manage > Pull or Deploy > Deploy HEAD Commit.
+# The real work lives in deploy/cpanel_deploy.sh so it can also be run by hand
+# from the cPanel Terminal.
+deployment:
+  tasks:
+    - export APPROOT="$HOME/employee-dashboard"
+    - /bin/bash deploy/cpanel_deploy.sh

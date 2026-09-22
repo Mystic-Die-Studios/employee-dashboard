@@ -9,6 +9,10 @@ export default async function userVerify() {
     }
 }
 
-export async function adminLogout() {
-    await api.post('/api/v1/user/admin/logout/');
+export async function logout() {
+    try {
+        await api.post('/api/v1/user/logout/');
+    } catch {
+        // Cookies are cleared server-side on a best-effort basis; never block sign-out.
+    }
 }

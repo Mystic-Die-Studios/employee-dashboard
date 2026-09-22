@@ -26,4 +26,11 @@ export default defineConfig([
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
     },
   },
+  {
+    // Specs run in Cypress, which injects cy/Cypress and the Mocha globals.
+    files: ['cypress/**/*.{js,jsx}', 'cypress.config.js'],
+    languageOptions: {
+      globals: { ...globals.browser, ...globals.mocha, cy: 'readonly', Cypress: 'readonly' },
+    },
+  },
 ])

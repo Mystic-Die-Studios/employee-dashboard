@@ -13,31 +13,51 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 from pathlib import Path
 from datetime import timedelta
 import os
+import re
 import pymysql
 from dotenv import load_dotenv
 
-load_dotenv()
 pymysql.install_as_MySQLdb()
-
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Load .env by absolute path rather than relative to the process working
+# directory, which Passenger does not guarantee. In development the file sits at
+# the repository root; a cPanel deploy puts it next to the Django code.
+for _candidate in (BASE_DIR / '.env', BASE_DIR.parent / '.env'):
+    if _candidate.is_file():
+        load_dotenv(_candidate)
+        break
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
+
+def env_bool(name, default=False):
+    """Parse a boolean env var. Without this, DEBUG='False' reads as truthy."""
+    value = os.getenv(name)
+    if value is None or value.strip() == '':
+        return default
+    return value.strip().lower() in ('1', 'true', 'yes', 'on')
+
+def env_list(name, default=''):
+    return [item.strip() for item in os.getenv(name, default).split(',') if item.strip()]
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.getenv('DJANGO_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DEBUG')
+DEBUG = env_bool('DEBUG', False)
 
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS').split(',')
+ALLOWED_HOSTS = env_list('ALLOWED_HOSTS') or ['localhost', '127.0.0.1']
 
 AUTH_USER_MODEL = 'user_app.User'
 
-CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', '').split(',')
-CORS_ALLOW_CREDENTIALS = CORS_ALLOW_CREDENTIALS = os.getenv('CORS_ALLOW_CREDENTIALS', '').lower() == 'true'
+CORS_ALLOWED_ORIGINS = env_list('CORS_ALLOWED_ORIGINS') or ['http://localhost:5173']
+# Cookie-based auth cannot work without this: the browser drops the Set-Cookie
+# on a cross-origin response unless credentials are allowed.
+CORS_ALLOW_CREDENTIALS = env_bool('CORS_ALLOW_CREDENTIALS', True)
+CSRF_TRUSTED_ORIGINS = env_list('CSRF_TRUSTED_ORIGINS') or CORS_ALLOWED_ORIGINS
 
 # Application definition
 
@@ -55,8 +75,9 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware', 
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -135,6 +156,38 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+STORAGES = {
+    'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+    'staticfiles': {'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage'},
+}
+
+# The built React app. In production the deploy script drops it next to the
+# Django code; locally it is wherever `npm run build` left it.
+FRONTEND_DIST_DIR = Path(
+    os.getenv('FRONTEND_DIST_DIR') or (
+        BASE_DIR / 'frontend' if (BASE_DIR / 'frontend' / 'index.html').exists()
+        else BASE_DIR.parent / 'client' / 'dist'
+    )
+)
+
+# Serve the SPA's own assets (/assets/*, /favicon.svg) straight off disk.
+if FRONTEND_DIST_DIR.is_dir():
+    WHITENOISE_ROOT = FRONTEND_DIST_DIR
+
+WHITENOISE_INDEX_FILE = True
+
+def _is_fingerprinted_asset(path, url):
+    """Vite and collectstatic both fingerprint filenames, so those never change.
+
+    index.html must NOT be cached: a stale copy points at hashed bundles that the
+    next deploy deletes, which leaves the user on a blank page.
+    """
+    return bool(re.match(r'^/(assets|static)/.+[-.][A-Za-z0-9_-]{8,}\.\w+$', url))
+
+WHITENOISE_IMMUTABLE_FILE_TEST = _is_fingerprinted_asset
+WHITENOISE_MAX_AGE = 0  # everything else revalidates; ETags make that cheap
 
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME':  timedelta(minutes=15),
@@ -144,3 +197,28 @@ SIMPLE_JWT = {
 }
 
 JWT_REFRESH_COOKIE = 'refresh_token'
+
+# Auth cookie flags. Secure cookies are dropped by the browser over plain http,
+# so they must stay off for local dev and on everywhere else. Cross-site
+# deployments (frontend and API on different registrable domains) need
+# AUTH_COOKIE_SAMESITE='None', which browsers only honour together with Secure.
+AUTH_COOKIE_SECURE = env_bool('SESSION_COOKIE_SECURE', not DEBUG)
+AUTH_COOKIE_SAMESITE = os.getenv('AUTH_COOKIE_SAMESITE', 'Lax').strip() or 'Lax'
+
+SESSION_COOKIE_SECURE = AUTH_COOKIE_SECURE
+SESSION_COOKIE_HTTPONLY = env_bool('SESSION_COOKIE_HTTPONLY', True)
+CSRF_COOKIE_SECURE = env_bool('CSRF_COOKIE_SECURE', not DEBUG)
+
+# cPanel terminates TLS at Apache/LiteSpeed and forwards over plain http, so
+# Django needs the forwarded header to know the request was really https.
+# Only trust it when a proxy is actually in front; otherwise it is spoofable.
+if env_bool('TRUST_PROXY_SSL_HEADER', not DEBUG):
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    USE_X_FORWARDED_HOST = True
+
+SECURE_SSL_REDIRECT = env_bool('SECURE_SSL_REDIRECT', False)
+
+# HSTS is sticky in browsers, so it stays opt-in. Turn it on only once the site
+# is confirmed working over https on every subdomain you care about.
+SECURE_HSTS_SECONDS = int(os.getenv('SECURE_HSTS_SECONDS') or 0)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool('SECURE_HSTS_INCLUDE_SUBDOMAINS', False)
