@@ -53,26 +53,66 @@ else
     cp -Rf "$REPO_DIR/server/." "$APPROOT/"
 fi
 
-# cPanel does not put Node on the default PATH, but EasyApache and the
-# "Setup Node.js App" tool both install it in predictable places.
-find_npm_dir() {
+# The build toolchain's floor. Vite 8 refuses to run below this, and on an older
+# Node it fails deep inside the CLI rather than with a clean version error.
+REQUIRED_NODE="20.19.0"
+
+# Is $1 >= $2, comparing as versions rather than as strings?
+version_ge() {
+    [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n1)" = "$2" ]
+}
+
+# Every Node bin directory on the box. cPanel keeps them out of the default
+# PATH: EasyApache under /opt/cpanel, and "Setup Node.js App" under ~/nodevenv.
+node_bin_dirs() {
+    local dir
     if command -v npm >/dev/null 2>&1; then
         dirname "$(command -v npm)"
-        return
     fi
-    local dir
-    for dir in $(ls -1d /opt/cpanel/ea-nodejs*/bin 2>/dev/null | sort -rV || true) \
-               $(ls -1d "$HOME"/nodevenv/*/*/bin 2>/dev/null | sort -rV || true); do
-        if [ -x "$dir/npm" ]; then
-            echo "$dir"
-            return
-        fi
+    for dir in /opt/cpanel/ea-nodejs*/bin "$HOME"/nodevenv/*/*/bin; do
+        [ -x "$dir/npm" ] && echo "$dir"
     done
+}
+
+# Highest version that actually satisfies REQUIRED_NODE. Ask each node for its
+# own version -- the directory name is not reliable, and sorting paths would
+# rank ~/nodevenv/standup-bot/18 above ~/nodevenv/other/22.
+find_npm_dir() {
+    local dir ver best="" best_ver=""
+    while read -r dir; do
+        [ -n "$dir" ] || continue
+        ver="$("$dir/node" -v 2>/dev/null | sed 's/^v//')" || continue
+        [ -n "$ver" ] || continue
+        version_ge "$ver" "$REQUIRED_NODE" || continue
+        if [ -z "$best_ver" ] || version_ge "$ver" "$best_ver"; then
+            best="$dir"
+            best_ver="$ver"
+        fi
+    done < <(node_bin_dirs)
+    [ -n "$best" ] && echo "$best"
+}
+
+report_node_versions() {
+    local dir ver
+    while read -r dir; do
+        [ -n "$dir" ] || continue
+        ver="$("$dir/node" -v 2>/dev/null || echo '?')"
+        echo "  $ver  $dir" >&2
+    done < <(node_bin_dirs)
 }
 
 NPM_DIR="${NODE_BIN_DIR:-$(find_npm_dir || true)}"
 if [ -n "$NPM_DIR" ] && [ -x "$NPM_DIR/npm" ]; then
     export PATH="$NPM_DIR:$PATH"
+elif [ -n "$(node_bin_dirs)" ]; then
+    echo "ERROR: Node $REQUIRED_NODE or newer is required to build the frontend." >&2
+    echo "Found only:" >&2
+    report_node_versions
+    echo "" >&2
+    echo "In cPanel > Setup Node.js App, create an application with Node 20 or 22" >&2
+    echo "(any app root -- it exists purely to install the runtime), then re-run." >&2
+    echo "Alternatively build locally and upload client/dist to $APPROOT/frontend/." >&2
+    exit 1
 fi
 
 say "Building the frontend"
