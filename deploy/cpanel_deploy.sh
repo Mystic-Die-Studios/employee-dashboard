@@ -12,11 +12,36 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APPROOT="${APPROOT:-$HOME/employee-dashboard}"
-VENV_GLOB="${VENV_GLOB:-$HOME/virtualenv/employee-dashboard}"
+# cPanel names the virtualenv after the Application root, so derive it rather
+# than hardcoding a name that only matches one possible setup.
+VENV_GLOB="${VENV_GLOB:-$HOME/virtualenv/$(basename "$APPROOT")}"
 
 say() { printf '\n==> %s\n' "$1"; }
 
 say "Deploying $REPO_DIR -> $APPROOT"
+
+# Refuse to write application code and secrets into a public document root.
+# Passenger normally intercepts every request, but if it ever fails to boot,
+# Apache can fall back to serving these as plain files -- including .env.
+if [ "${ALLOW_DOCROOT_APPROOT:-0}" != "1" ]; then
+    for docroot in "$HOME/public_html" "$HOME"/*.*.*; do
+        [ -d "$docroot" ] || continue
+        case "$APPROOT/" in
+            "$docroot"/*)
+                if [ "$APPROOT" = "$docroot" ]; then
+                    echo "ERROR: the app root IS the document root ($APPROOT)." >&2
+                else
+                    echo "ERROR: app root $APPROOT sits inside the document root $docroot." >&2
+                fi
+                echo "Secrets in .env would be one Passenger failure away from public." >&2
+                echo "Recreate the Python App with an Application root outside it," >&2
+                echo "such as 'employee-dashboard'." >&2
+                echo "To deploy anyway: ALLOW_DOCROOT_APPROOT=1 bash $0" >&2
+                exit 1
+                ;;
+        esac
+    done
+fi
 mkdir -p "$APPROOT" "$APPROOT/tmp" "$APPROOT/frontend"
 
 say "Copying Django code"
@@ -27,8 +52,31 @@ else
     cp -Rf "$REPO_DIR/server/." "$APPROOT/"
 fi
 
+# cPanel does not put Node on the default PATH, but EasyApache and the
+# "Setup Node.js App" tool both install it in predictable places.
+find_npm_dir() {
+    if command -v npm >/dev/null 2>&1; then
+        dirname "$(command -v npm)"
+        return
+    fi
+    local dir
+    for dir in $(ls -1d /opt/cpanel/ea-nodejs*/bin 2>/dev/null | sort -rV || true) \
+               $(ls -1d "$HOME"/nodevenv/*/*/bin 2>/dev/null | sort -rV || true); do
+        if [ -x "$dir/npm" ]; then
+            echo "$dir"
+            return
+        fi
+    done
+}
+
+NPM_DIR="${NODE_BIN_DIR:-$(find_npm_dir || true)}"
+if [ -n "$NPM_DIR" ] && [ -x "$NPM_DIR/npm" ]; then
+    export PATH="$NPM_DIR:$PATH"
+fi
+
 say "Building the frontend"
 if command -v npm >/dev/null 2>&1; then
+    echo "Using npm $(npm -v) from $(dirname "$(command -v npm)")"
     ( cd "$REPO_DIR/client" && npm ci --no-audit --no-fund && npm run build )
     cp -Rf "$REPO_DIR/client/dist/." "$APPROOT/frontend/"
 elif [ -d "$REPO_DIR/client/dist" ]; then
@@ -39,8 +87,12 @@ elif [ -f "$APPROOT/frontend/index.html" ]; then
     echo "Keeping the frontend already deployed at $APPROOT/frontend."
 else
     echo "ERROR: no way to produce a frontend build." >&2
-    echo "Install Node on the host, or build locally and upload client/dist" >&2
-    echo "to $APPROOT/frontend/." >&2
+    echo "npm was not found on PATH, under /opt/cpanel/ea-nodejs*/bin, or in" >&2
+    echo "$HOME/nodevenv/*/*/bin. Options:" >&2
+    echo "  - point at it directly: NODE_BIN_DIR=/path/to/bin bash $0" >&2
+    echo "  - create any app in cPanel > Setup Node.js App to install Node" >&2
+    echo "  - build locally (npm run build in client/) and upload client/dist" >&2
+    echo "    to $APPROOT/frontend/" >&2
     exit 1
 fi
 
@@ -48,7 +100,10 @@ fi
 ACTIVATE="$(ls -1 "$VENV_GLOB"/*/bin/activate 2>/dev/null | head -n 1 || true)"
 if [ -z "$ACTIVATE" ]; then
     echo "ERROR: no virtualenv found under $VENV_GLOB." >&2
-    echo "Create the app in cPanel > Setup Python App first." >&2
+    echo "cPanel names it after the Application root, so this usually means the" >&2
+    echo "Python App root and APPROOT ($APPROOT) disagree." >&2
+    echo "Virtualenvs that do exist:" >&2
+    ls -1d "$HOME"/virtualenv/*/ 2>/dev/null >&2 || echo "  (none)" >&2
     exit 1
 fi
 
