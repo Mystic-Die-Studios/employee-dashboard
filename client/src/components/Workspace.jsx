@@ -1,4 +1,16 @@
 import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import {
+  createDocument,
+  createTask,
+  deleteDocument,
+  loadWorkspace,
+  saveDocument,
+  saveTask,
+  workspaceError,
+} from "../api/workspace";
+import MarkdownPreview from "./Markdown";
+import Reviews from "./Reviews";
 import "./Workspace.css";
 
 const initialDocuments = [
@@ -8,7 +20,7 @@ const initialDocuments = [
     category: "Getting started",
     icon: "✦",
     updated: "Just now",
-    body: "A little magic. A lot of making.\n\nThis is our shared home for the ideas, decisions, and details that bring our games to life.\n\nSTART HERE\nExplore the project board to see what we are building. Keep your notes in Documents, and use My tasks to find your next move.\n\nHOW WE WORK\nMake room for bold ideas. Write things down. Share early, give thoughtful feedback, and keep moving together.",
+    body: "# A little magic. A lot of making.\n\nThis is our shared home for the ideas, decisions, and details that bring our games to life.\n\n## Start here\nExplore the project board to see what we are building. Keep your notes in Documents, and use My tasks to find your next move.\n\n## How we work\n- Make room for bold ideas.\n- Write things down.\n- Share early, give thoughtful feedback, and keep moving together.",
   },
   {
     id: "direction",
@@ -78,6 +90,29 @@ const initialTasks = [
   },
 ];
 const statuses = ["To do", "In progress", "Done"];
+const views = ["Home", "Projects", "Documents", "My tasks", "Reviews", "Team"];
+const emptyWorkspace = { documents: [], tasks: [], reviews: [], members: [] };
+const previewMembers = [
+  { id: "demo", github_username: "Demo artist", role: "employee" },
+  { id: "lead", github_username: "Demo review lead", role: "admin" },
+];
+const previewReviews = [{
+  id: "demo-review",
+  ticket: "ART-DEMO-001",
+  title: "Forest gate · environment concept",
+  project: "Project Reconnection",
+  description: "## Ready for a first look\n\nReview the silhouette, lighting, and sense of discovery.\n\n- [x] First concept pass\n- [ ] Gather feedback\n- [ ] Refine the composition",
+  file_name: "forest-gate-concept.png",
+  file_size: 1450000,
+  author: { id: "demo", github_username: "Demo artist" },
+  status: "changes_requested",
+  github_sync_status: "not_configured",
+  github_issue_url: null,
+  created_at: "2026-10-09T16:00:00Z",
+  feedback: [{ id: "demo-feedback", body: "Strong atmosphere. Give the entrance a little more contrast so the player knows where to go.", decision: "changes_requested", author: { id: "lead", github_username: "Demo review lead" }, created_at: "2026-10-09T17:00:00Z" }],
+  can_review: false,
+  can_sync: false,
+}];
 
 function Icon({ name, size = 20 }) {
   const paths = {
@@ -167,14 +202,14 @@ function readWorkspace(storageKey) {
           statuses.includes(t.status),
       )
     )
-      return saved;
+      return { ...saved, reviews: Array.isArray(saved.reviews) ? saved.reviews : previewReviews, members: previewMembers };
   } catch {
     /* Start with sample content when storage is unavailable. */
   }
-  return { documents: initialDocuments, tasks: initialTasks };
+  return { documents: initialDocuments, tasks: initialTasks, reviews: previewReviews, members: previewMembers };
 }
 
-function TaskDialog({ onClose, onSubmit, initialStatus }) {
+function TaskDialog({ onClose, onSubmit, initialStatus, busy, error }) {
   const dialog = useRef(null);
   useEffect(() => {
     const element = dialog.current;
@@ -190,22 +225,23 @@ function TaskDialog({ onClose, onSubmit, initialStatus }) {
       ref={dialog}
       className="task-modal"
       aria-labelledby="task-modal-title"
-      onCancel={onClose}
+      onCancel={(event) => { if (busy) event.preventDefault(); else onClose(); }}
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           event.preventDefault();
-          onClose();
+          if (!busy) onClose();
         }
       }}
     >
       <div className="section-heading">
         <h2 id="task-modal-title">A new step forward.</h2>
-        <button onClick={onClose} aria-label="Close task form">
+        <button onClick={onClose} disabled={busy} aria-label="Close task form">
           ✕
         </button>
       </div>
       <p>Add a task to your studio board.</p>
       <form onSubmit={onSubmit}>
+        <fieldset disabled={busy}>
         <input type="hidden" name="status" value={initialStatus} />
         <label>
           Task name
@@ -219,10 +255,7 @@ function TaskDialog({ onClose, onSubmit, initialStatus }) {
         </label>
         <label>
           Project
-          <select name="project">
-            <option>Project Reconnection</option>
-            <option>Studio operations</option>
-          </select>
+          <input name="project" required maxLength={120} defaultValue="Project Reconnection" placeholder="Project name" />
         </label>
         <label>
           Priority
@@ -232,12 +265,14 @@ function TaskDialog({ onClose, onSubmit, initialStatus }) {
             <option>Low</option>
           </select>
         </label>
+        </fieldset>
+        {error && <p className="form-error" role="alert">{error}</p>}
         <div className="modal-actions">
-          <button type="button" className="secondary-button" onClick={onClose}>
+          <button type="button" className="secondary-button" onClick={onClose} disabled={busy}>
             Cancel
           </button>
-          <button className="primary-button" type="submit">
-            Create task <Icon name="plus" size={16} />
+          <button className="primary-button" type="submit" disabled={busy}>
+            {busy ? "Creating…" : "Create task"} <Icon name="plus" size={16} />
           </button>
         </div>
       </form>
@@ -246,18 +281,35 @@ function TaskDialog({ onClose, onSubmit, initialStatus }) {
 }
 
 export default function Workspace({ user, onLogout, preview = false }) {
-  const storageKey = `mystic-workspace-demo-v1:${preview ? "public" : user?.id || user?.email || user?.github_username || "member"}`;
-  const [data, setData] = useState(() => readWorkspace(storageKey));
-  const [view, setView] = useState("Home");
+  const storageKey = "mystic-workspace-demo-v1:public";
+  const [data, setData] = useState(() => preview ? readWorkspace(storageKey) : emptyWorkspace);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [demoNavigation, setDemoNavigation] = useState({ view: "Home", doc: null, review: null });
+  const requestedView = preview ? demoNavigation.view : searchParams.get("view");
+  const view = views.includes(requestedView) ? requestedView : "Home";
+  const selectedId = view === "Documents" ? preview ? demoNavigation.doc : searchParams.get("doc") : null;
+  const reviewId = view === "Reviews" ? preview ? demoNavigation.review : searchParams.get("review") : null;
+  const [openTabs, setOpenTabs] = useState([]);
+  const [drafts, setDrafts] = useState({});
+  const [conflicts, setConflicts] = useState({});
+  const [editorMode, setEditorMode] = useState("Write");
+  const [loading, setLoading] = useState(!preview);
+  const [loadError, setLoadError] = useState("");
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [busy, setBusy] = useState("");
+  const [taskError, setTaskError] = useState("");
+  const [reviewForm, setReviewForm] = useState(false);
+  const storageWarning = useRef(null);
   const [query, setQuery] = useState("");
-  const [selectedId, setSelectedId] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [taskForm, setTaskForm] = useState(false);
   const [notice, setNotice] = useState("");
-  const storageWarning = useRef(null);
   const name =
     user?.github_username || user?.email?.split("@")[0] || "Studio member";
   const selected = data.documents.find((d) => d.id === selectedId);
+  const draft = selected ? drafts[selected.id] || selected : null;
+  const hasDrafts = Object.keys(drafts).length > 0;
+  const documentDirty = selected && Boolean(drafts[selected.id]);
   const filteredDocuments = data.documents.filter((d) =>
     `${d.title} ${d.category} ${d.body}`
       .toLowerCase()
@@ -270,48 +322,92 @@ export default function Workspace({ user, onLogout, preview = false }) {
   const progress = data.tasks.length
     ? Math.round((complete / data.tasks.length) * 100)
     : 0;
+  const projectCount = new Set([...data.tasks.map((task) => task.project), ...data.reviews.map((review) => review.project)].filter(Boolean)).size;
 
   useEffect(() => {
+    if (preview) return;
+    const controller = new AbortController();
+    async function request() {
+      setLoading(true);
+      setLoadError("");
+      try {
+        const snapshot = await loadWorkspace({ signal: controller.signal });
+        if (!controller.signal.aborted) setData({ ...emptyWorkspace, ...snapshot });
+      } catch (failure) {
+        if (!controller.signal.aborted) setLoadError(workspaceError(failure, "We could not load your studio workspace. Try again."));
+      } finally { if (!controller.signal.aborted) setLoading(false); }
+    }
+    request();
+    return () => controller.abort();
+  }, [preview, user?.id, loadAttempt]);
+
+  useEffect(() => {
+    if (!preview) return;
     try {
       localStorage.setItem(storageKey, JSON.stringify(data));
-      if (storageWarning.current)
-        storageWarning.current.textContent = "Saved in this browser";
+      if (storageWarning.current) storageWarning.current.textContent = "Saved in this browser";
     } catch {
-      if (storageWarning.current)
-        storageWarning.current.textContent =
-          "Storage unavailable — changes last for this session";
+      if (storageWarning.current) storageWarning.current.textContent = "Storage unavailable — changes last for this session";
     }
-  }, [data, storageKey, selectedId]);
+  }, [data, storageKey, preview, selectedId]);
+
+  useEffect(() => {
+    if (!hasDrafts) return;
+    function warn(event) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [hasDrafts]);
+
+  function navigate(next, doc = null, review = null) {
+    if (preview) setDemoNavigation({ view: next, doc, review });
+    else {
+      const params = new URLSearchParams();
+      if (next !== "Home") params.set("view", next);
+      if (doc) params.set("doc", doc);
+      if (review) params.set("review", review);
+      setSearchParams(params);
+    }
+  }
 
   function go(next) {
-    setView(next);
-    setSelectedId(null);
+    navigate(next);
     setQuery("");
     setMenuOpen(false);
     setNotice("");
   }
   function openDocument(id) {
-    setView("Documents");
-    setSelectedId(id);
+    navigate("Documents", id);
+    setOpenTabs((current) => current.includes(id) ? current : [...current, id]);
     setMenuOpen(false);
     setQuery("");
+    setEditorMode("Write");
   }
-  function newDocument() {
-    const doc = {
-      id: crypto.randomUUID(),
+  async function newDocument() {
+    if (busy || loading || loadError) return;
+    const fields = {
       title: "Untitled document",
       category: "Studio wiki",
       icon: "▤",
-      updated: "Just now",
       body: "",
     };
-    setData((current) => ({
-      ...current,
-      documents: [doc, ...current.documents],
-    }));
-    openDocument(doc.id);
+    setBusy("create-document");
+    setNotice("");
+    try {
+      const doc = preview ? { ...fields, id: crypto.randomUUID(), updated: "Just now" } : await createDocument(fields);
+      setData((current) => ({ ...current, documents: [doc, ...current.documents] }));
+      openDocument(doc.id);
+    } catch (failure) { setNotice(workspaceError(failure, "This page could not be created. Try again.")); }
+    finally { setBusy(""); }
   }
   function updateDocument(field, value) {
+    if (!selected) return;
+    if (!preview) {
+      setDrafts((current) => ({ ...current, [selected.id]: { ...selected, ...current[selected.id], [field]: value } }));
+      return;
+    }
     setData((current) => ({
       ...current,
       documents: current.documents.map((d) =>
@@ -319,36 +415,95 @@ export default function Workspace({ user, onLogout, preview = false }) {
       ),
     }));
   }
-  function changeStatus(id, status) {
-    setData((current) => ({
-      ...current,
-      tasks: current.tasks.map((t) => (t.id === id ? { ...t, status } : t)),
-    }));
+  async function changeStatus(id, status) {
+    if (busy) return;
+    setBusy(`task:${id}`);
+    setNotice("");
+    try {
+      const updated = preview ? { ...data.tasks.find((task) => task.id === id), status } : await saveTask(id, { status });
+      setData((current) => ({ ...current, tasks: current.tasks.map((task) => task.id === id ? updated : task) }));
+    } catch (failure) { setNotice(workspaceError(failure, "Task status was not saved. Choose a status to try again.")); }
+    finally { setBusy(""); }
   }
-  function addTask(event) {
+  async function addTask(event) {
     event.preventDefault();
+    if (busy) return;
     const form = new FormData(event.currentTarget);
     const title = form.get("title").trim();
     if (!title) return;
-    setData((current) => ({
-      ...current,
-      tasks: [
-        {
-          id: crypto.randomUUID(),
-          title,
-          project: form.get("project"),
-          priority: form.get("priority"),
-          status: form.get("status"),
-          person: "You",
-        },
-        ...current.tasks,
-      ],
-    }));
-    setTaskForm(false);
+    const fields = { title, project: form.get("project"), priority: form.get("priority"), status: form.get("status") };
+    setBusy("create-task");
+    setTaskError("");
+    try {
+      const task = preview ? { ...fields, id: crypto.randomUUID(), person: "You" } : await createTask(fields);
+      setData((current) => ({ ...current, tasks: [task, ...current.tasks] }));
+      setTaskForm(false);
+    } catch (failure) { setTaskError(workspaceError(failure, "This task could not be created. Your form is still here.")); }
+    finally { setBusy(""); }
+  }
+  async function savePage() {
+    if (!selected || !documentDirty || busy) return;
+    if (!draft.title.trim()) { setNotice("Give this page a title before saving."); return; }
+    setBusy("save-document");
+    setNotice("");
+    try {
+      const saved = await saveDocument(selected.id, { title: draft.title.trim(), body: draft.body, version: draft.version });
+      setData((current) => ({ ...current, documents: current.documents.map((doc) => doc.id === saved.id ? saved : doc) }));
+      setDrafts((current) => { const next = { ...current }; delete next[saved.id]; return next; });
+      setNotice("Page saved to the studio workspace.");
+    } catch (failure) {
+      if (failure.response?.status === 409) {
+        setConflicts((current) => ({ ...current, [selected.id]: { latest: null } }));
+        setNotice("Another member changed this page. Your draft is safe. Compare with the saved page before saving again.");
+      } else setNotice(workspaceError(failure, "Your page could not be saved. Your draft is still here; try again."));
+    } finally { setBusy(""); }
+  }
+  async function comparePage() {
+    setBusy("compare-document");
+    try {
+      const snapshot = await loadWorkspace();
+      const latest = snapshot.documents.find((doc) => doc.id === selected.id);
+      if (!latest) { setNotice("This page was removed. Copy your draft into a new page."); return; }
+      setConflicts((current) => ({ ...current, [selected.id]: { latest } }));
+    } catch (failure) { setNotice(workspaceError(failure, "The saved page could not be loaded. Your draft is still here.")); }
+    finally { setBusy(""); }
+  }
+  function useLatestVersion() {
+    const latest = conflicts[selected.id]?.latest;
+    if (!latest) return;
+    setData((current) => ({ ...current, documents: current.documents.map((doc) => doc.id === latest.id ? latest : doc) }));
+    setDrafts((current) => ({ ...current, [selected.id]: { ...current[selected.id], version: latest.version } }));
+    setConflicts((current) => { const next = { ...current }; delete next[selected.id]; return next; });
+    setNotice("Review and merge your draft, then Save page to replace the latest saved content.");
+  }
+  async function removePage() {
+    if (!selected || busy) return;
+    if (!window.confirm(`Delete “${selected.title}”? This removes the shared page and its contents from the studio workspace.`)) return;
+    setBusy("delete-document");
+    try {
+      await deleteDocument(selected.id);
+      setData((current) => ({ ...current, documents: current.documents.filter((doc) => doc.id !== selected.id) }));
+      setDrafts((current) => { const next = { ...current }; delete next[selected.id]; return next; });
+      setOpenTabs((current) => current.filter((id) => id !== selected.id));
+      go("Documents");
+      setNotice("Page deleted.");
+    } catch (failure) { setNotice(workspaceError(failure, "This page could not be deleted.")); }
+    finally { setBusy(""); }
+  }
+  function upsertReview(review) {
+    setData((current) => ({ ...current, reviews: current.reviews.some((item) => item.id === review.id) ? current.reviews.map((item) => item.id === review.id ? review : item) : [review, ...current.reviews] }));
   }
   async function signOut() {
-    await onLogout?.();
-    window.location.assign("/");
+    if (hasDrafts) { setNotice("Save your open page drafts before signing out."); return; }
+    if (busy) return;
+    setBusy("logout");
+    setNotice("");
+    try {
+      await onLogout?.();
+      window.location.assign("/");
+    } catch (failure) {
+      setNotice(workspaceError(failure, "Sign-out failed. You are still signed in; try again."));
+    } finally { setBusy(""); }
   }
 
   const documentList = (
@@ -415,6 +570,7 @@ export default function Workspace({ user, onLogout, preview = false }) {
             ["Projects", "project"],
             ["Documents", "document"],
             ["My tasks", "task"],
+            ["Reviews", "task"],
             ["Team", "team"],
           ].map(([label, icon]) => (
             <button
@@ -424,7 +580,7 @@ export default function Workspace({ user, onLogout, preview = false }) {
               onClick={() => go(label)}
             >
               <Icon name={icon} />
-              {label}
+              {label}{label === "Documents" && <span className="nav-wiki">Wiki</span>}
               {label === "My tasks" && (
                 <span className="nav-count">
                   {
@@ -439,7 +595,7 @@ export default function Workspace({ user, onLogout, preview = false }) {
         </nav>
         <div className="nav-section-heading">
           <p className="nav-label">PINNED PAGES</p>
-          <button aria-label="Create document" onClick={newDocument}>
+          <button aria-label="Create document" onClick={newDocument} disabled={Boolean(busy) || loading || Boolean(loadError)}>
             <Icon name="plus" size={16} />
           </button>
         </div>
@@ -457,7 +613,7 @@ export default function Workspace({ user, onLogout, preview = false }) {
           <span>✧</span>
           <h4>Good things start here.</h4>
           <p>A shared space for the things we’re making together.</p>
-          <button onClick={newDocument}>
+          <button onClick={newDocument} disabled={Boolean(busy) || loading || Boolean(loadError)}>
             Capture an idea <Icon name="arrow" size={16} />
           </button>
         </div>
@@ -475,6 +631,7 @@ export default function Workspace({ user, onLogout, preview = false }) {
             <button
               onClick={signOut}
               aria-label="Log out"
+              disabled={Boolean(busy)}
               data-testid="logout-btn"
             >
               <Icon name="logout" size={18} />
@@ -504,15 +661,23 @@ export default function Workspace({ user, onLogout, preview = false }) {
             Studio workspace
           </span>
         </header>
-        <div className="preview-banner">
+        {preview && <div className="preview-banner">
           <span className="preview-dot" />
-          Frontend preview · Sample content. Edits are saved only in this
-          browser.
+          Demo workspace · Sample content. Edits stay in this browser;
+          files are not uploaded.
           <a href={preview ? "/" : "/preview"}>
             {preview ? "Studio sign in" : "Open public preview"}{" "}
             <Icon name="arrow" size={14} />
           </a>
-        </div>
+        </div>}
+        {loading ? <main className="workspace-content"><p className="empty-state" role="status">Loading your studio workspace…</p></main> : loadError ? <main className="workspace-content"><div className="empty-state" role="alert"><h2>Workspace unavailable</h2><p>{loadError}</p><button className="primary-button" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>Retry workspace</button></div></main> : <>
+        {openTabs.length > 0 && <div className="open-document-tabs" role="tablist" aria-label="Open documents">
+          {[...new Set([...openTabs, ...(selectedId ? [selectedId] : [])])].map((id) => {
+            const doc = data.documents.find((item) => item.id === id);
+            if (!doc) return null;
+            return <button key={id} role="tab" aria-selected={selectedId === id} onClick={() => openDocument(id)}>{drafts[id]?.title || doc.title}{drafts[id] && <span aria-label="Unsaved changes"> ●</span>}</button>;
+          })}
+        </div>}
         <main className="workspace-content" data-testid="dashboard-header">
           <div className="page-heading">
             <div>
@@ -530,6 +695,8 @@ export default function Workspace({ user, onLogout, preview = false }) {
                         ? "A home for what we know."
                         : view === "My tasks"
                           ? "Find your next move."
+                        : view === "Reviews"
+                          ? "Create. Share. Refine."
                           : "Made better, together."}
               </h1>
               <p className="page-subtitle">
@@ -541,25 +708,32 @@ export default function Workspace({ user, onLogout, preview = false }) {
                       ? "Capture ideas, share knowledge, and keep everyone on the same page."
                       : view === "My tasks"
                         ? "A little focus goes a long way. Here’s what’s on your plate."
-                        : "The people behind the magic. Team management is coming next."}
+                        : view === "Reviews"
+                          ? "Upload artwork, collect feedback, and track every review in one place."
+                        : "The people behind the magic. Your studio’s GitHub member directory."}
               </p>
             </div>
-            <button
+            {view !== "Team" && <button
               className="primary-button"
+              disabled={Boolean(busy)}
               onClick={
                 view === "Projects" || view === "My tasks"
-                  ? () => setTaskForm("To do")
+                  ? () => { setTaskError(""); setTaskForm("To do"); }
+                  : view === "Reviews"
+                    ? () => setReviewForm(true)
                   : newDocument
               }
             >
               <Icon name="plus" size={18} />
               {view === "Projects" || view === "My tasks"
                 ? "New task"
+                : view === "Reviews"
+                  ? "New review"
                 : "New page"}
-            </button>
+            </button>}
           </div>
           {notice && (
-            <div className="workspace-notice" role="status">
+            <div className="workspace-notice" role="alert">
               {notice}
             </div>
           )}
@@ -593,7 +767,7 @@ export default function Workspace({ user, onLogout, preview = false }) {
               </section>
               <div className="stats-row">
                 {[
-                  ["project", "Active projects", "1", "A world in the making"],
+                  ["project", "Active projects", projectCount, "Worlds in the making"],
                   [
                     "document",
                     "Shared documents",
@@ -643,11 +817,11 @@ export default function Workspace({ user, onLogout, preview = false }) {
                 <span className="project-emblem">◈</span>
                 <div>
                   <span className="eyebrow">IN THE MAKING</span>
-                  <h3>Project Reconnection</h3>
-                  <p>Every great world begins with a connection.</p>
+                  <h3>Studio workflow</h3>
+                  <p>Documents, tasks, and art reviews in one shared workspace.</p>
                 </div>
                 <div className="project-progress">
-                  <span>{progress}% of sample tasks complete</span>
+                  <span>{progress}% of {preview ? "sample " : ""}tasks complete</span>
                   <progress value={complete} max={data.tasks.length || 1} />
                 </div>
                 <button
@@ -660,19 +834,23 @@ export default function Workspace({ user, onLogout, preview = false }) {
             </>
           )}
 
-          {view !== "Home" && view !== "Team" && !selected && (
+          {view !== "Home" && view !== "Team" && !selected && !reviewId && (
             <div className="view-toolbar">
               <div className="view-tabs">
                 <span className="selected-tab">
                   {view === "Projects"
                     ? "Project board"
                     : view === "Documents"
-                      ? "All documents"
+                      ? "Markdown wiki · All documents"
+                      : view === "Reviews"
+                        ? "Review tickets"
                       : "Assigned to me"}
                 </span>
                 <span className="toolbar-count">
                   {view === "Documents"
                     ? filteredDocuments.length
+                    : view === "Reviews"
+                      ? data.reviews.length
                     : filteredTasks.filter(
                         (t) => view !== "My tasks" || t.person === "You",
                       ).length}
@@ -693,42 +871,60 @@ export default function Workspace({ user, onLogout, preview = false }) {
           {selected && (
             <section className="document-editor">
               <div className="editor-toolbar">
-                <button onClick={() => setSelectedId(null)}>
+                <button onClick={() => go("Documents")}>
                   ← All documents
                 </button>
-                <span ref={storageWarning} role="status">
-                  Saved in this browser
-                </span>
+                {preview ? <span ref={storageWarning} role="status">Saved in this browser</span> : <span role="status">{busy === "save-document" ? "Saving page…" : documentDirty ? "Unsaved changes" : "Saved to studio workspace"}</span>}
+                {!preview && <button className="primary-button" onClick={savePage} disabled={!documentDirty || Boolean(busy) || Boolean(conflicts[selected.id])}>Save page</button>}
               </div>
               <span className="editor-symbol">{selected.icon}</span>
               <input
                 className="editor-title"
                 aria-label="Document title"
-                value={selected.title}
+                value={draft.title}
                 maxLength={160}
+                disabled={Boolean(busy)}
                 onChange={(e) => updateDocument("title", e.target.value)}
               />
               <span className="editor-category">
                 {selected.category} <span>•</span> Studio document
               </span>
-              <textarea
+              <div className="editor-modes" role="tablist" aria-label="Document editor mode">
+                {["Write", "Preview"].map((mode) => <button role="tab" key={mode} aria-selected={editorMode === mode} onClick={() => setEditorMode(mode)}>{mode}</button>)}
+              </div>
+              {editorMode === "Write" ? <textarea
                 aria-label="Document content"
-                placeholder="Start writing your next great idea…"
-                value={selected.body}
+                placeholder="# Your next great idea\n\nWrite Markdown: headings, lists, links, tables, and checklists."
+                value={draft.body}
+                disabled={Boolean(busy)}
                 onChange={(e) => updateDocument("body", e.target.value)}
-              />
+              /> : <MarkdownPreview>{draft.body || "*This page is empty. Switch to Write to add content.*"}</MarkdownPreview>}
+              {conflicts[selected.id] && <div className="document-conflict" role="alert">
+                <h3>This page changed while you were writing.</h3>
+                <p>Your draft is still above. Compare the latest saved page and merge any changes before saving.</p>
+                <button className="secondary-button" onClick={comparePage} disabled={Boolean(busy)}>Compare with saved page</button>
+                {conflicts[selected.id].latest && <>
+                  <h4>Latest saved version: {conflicts[selected.id].latest.title}</h4>
+                  <MarkdownPreview>{conflicts[selected.id].latest.body}</MarkdownPreview>
+                  <p>Using this version keeps your draft. Your next save will replace the latest page with your merged draft.</p>
+                  <button className="secondary-button" onClick={useLatestVersion}>Use latest version for this draft</button>
+                </>}
+              </div>}
               <div className="editor-footnote">
-                Plain-text editor · Changes stay in this preview browser.
+                Markdown wiki · {preview ? "Changes stay in this demo browser." : "Save page to share changes with your studio. Drafts remain in open tabs until saved."}
+                {!preview && selected.can_delete && <button className="secondary-button" onClick={removePage} disabled={Boolean(busy)}>Delete page</button>}
               </div>
             </section>
           )}
+          {view === "Documents" && selectedId && !selected && <p className="empty-state">This page is unavailable or has been deleted.<button className="secondary-button" onClick={() => go("Documents")}>All documents</button></p>}
+          {view === "Reviews" && <Reviews reviews={data.reviews} selectedId={reviewId} onSelect={(id) => navigate("Reviews", null, id)} onUpdate={upsertReview} preview={preview} query={query} showForm={reviewForm} onCloseForm={() => setReviewForm(false)} />}
           {view === "Projects" && (
             <>
               <div className="board-project-title">
                 <span className="project-emblem">◈</span>
                 <div>
                   <h2>Studio project board</h2>
-                  <p>Project Reconnection & studio operations</p>
+                  <p>Shared tasks across studio projects</p>
                 </div>
                 <span className="pill">ACTIVE</span>
               </div>
@@ -770,6 +966,7 @@ export default function Workspace({ user, onLogout, preview = false }) {
                             <select
                               aria-label={`Status for ${task.title}`}
                               value={task.status}
+                              disabled={Boolean(busy) || (!preview && task.can_edit === false)}
                               onChange={(e) =>
                                 changeStatus(task.id, e.target.value)
                               }
@@ -783,7 +980,8 @@ export default function Workspace({ user, onLogout, preview = false }) {
                       ))}
                     <button
                       className="add-task-button"
-                      onClick={() => setTaskForm(status)}
+                      disabled={Boolean(busy)}
+                      onClick={() => { setTaskError(""); setTaskForm(status); }}
                     >
                       <Icon name="plus" size={16} />
                       Add task
@@ -803,6 +1001,7 @@ export default function Workspace({ user, onLogout, preview = false }) {
                       type="checkbox"
                       aria-label={`Mark ${task.title} complete`}
                       checked={task.status === "Done"}
+                      disabled={Boolean(busy) || (!preview && task.can_edit === false)}
                       onChange={(e) =>
                         changeStatus(
                           task.id,
@@ -826,6 +1025,7 @@ export default function Workspace({ user, onLogout, preview = false }) {
                     <select
                       aria-label={`Status for ${task.title}`}
                       value={task.status}
+                      disabled={Boolean(busy) || (!preview && task.can_edit === false)}
                       onChange={(e) => changeStatus(task.id, e.target.value)}
                     >
                       {statuses.map((s) => (
@@ -842,46 +1042,29 @@ export default function Workspace({ user, onLogout, preview = false }) {
             </div>
           )}
           {view === "Team" && (
-            <section className="team-panel">
-              <span className="person-avatar large">
-                {name.slice(0, 2).toUpperCase()}
-              </span>
-              <h2>{name}</h2>
-              <p>
-                {preview
-                  ? "Sample studio member"
-                  : user?.email || "Signed in with GitHub"}
-              </p>
-              <span className="pill">
-                {preview ? "PREVIEW MEMBER" : user?.role || "STUDIO MEMBER"}
-              </span>
-              <p className="team-description">
-                This is your studio workspace. The team directory and
-                invitations will be connected when the team API is available.
-              </p>
-              <button
-                className="secondary-button"
-                onClick={() =>
-                  setNotice(
-                    "Team invitations are planned for the backend integration. No invitation has been sent.",
-                  )
-                }
-              >
-                Invite a teammate <Icon name="plus" size={16} />
-              </button>
-            </section>
+            <div className="team-directory">
+              {data.members.map((member) => <article className="team-panel" key={member.id}>
+                <span className="person-avatar large">{(member.github_username || "Studio member").slice(0, 2).toUpperCase()}</span>
+                <div><h2>{member.github_username || "Studio member"}</h2><p>{preview ? "Sample studio member" : "Studio member"}</p></div>
+                <span className="pill">{member.role}</span>
+              </article>)}
+              {!data.members.length && <p className="empty-state">No studio members found.</p>}
+            </div>
           )}
           <footer className="workspace-footer">
             <span>✦ Made of ideas. Built together.</span>
             <span>Mystic Die Studios</span>
           </footer>
         </main>
+        </>}
       </div>
       {taskForm && (
         <TaskDialog
           onClose={() => setTaskForm(false)}
           onSubmit={addTask}
           initialStatus={taskForm}
+          busy={busy === "create-task"}
+          error={taskError}
         />
       )}
     </div>

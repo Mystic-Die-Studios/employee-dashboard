@@ -3,7 +3,7 @@ import os
 import re
 import uuid
 from datetime import timedelta
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 import requests
 from django.db.models import Q
@@ -76,7 +76,7 @@ def _portal_url(review):
     parsed = urlsplit(frontend)
     if parsed.scheme not in ('http', 'https') or not parsed.netloc or parsed.username or parsed.password:
         raise GitHubSyncError('The frontend URL configuration is invalid.')
-    return f'{frontend}/dashboard?review={review.id}'
+    return f'{frontend}/dashboard?{urlencode({"view": "Reviews", "review": str(review.id)})}'
 
 
 def _sync(review, repository, headers):

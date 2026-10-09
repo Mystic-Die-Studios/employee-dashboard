@@ -21,6 +21,7 @@ const ERROR_MESSAGES = {
   github_profile_failed:
     "We couldn't read your GitHub profile. Please try again.",
   no_code: "GitHub did not return an authorization code. Please try again.",
+  account_disabled: "Your studio account is disabled. Contact a studio administrator.",
 };
 
 export default function AuthPage() {

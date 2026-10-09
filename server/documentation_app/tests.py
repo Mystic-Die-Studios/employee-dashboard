@@ -239,13 +239,14 @@ class WorkspaceTests(TestCase):
         mock_get.return_value = github_response([])
         mock_post.return_value = github_response({'number': 42, 'html_url': 'https://github.com/studio/reviews/issues/42'}, 201)
         mock_patch.return_value = github_response({'number': 42})
-        with patch.dict('os.environ', {'REVIEW_GITHUB_REPOSITORY': 'studio/reviews', 'REVIEW_GITHUB_TOKEN': 'server-token'}):
+        with patch.dict('os.environ', {'REVIEW_GITHUB_REPOSITORY': 'studio/reviews', 'REVIEW_GITHUB_TOKEN': 'server-token', 'FRONTEND_URL': 'https://studio.example'}):
             response = self.client.post(reverse('workspace_review_github', kwargs={'pk': review.id}), {}, format='json')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['github_sync_status'], 'synced')
         self.assertEqual(response.data['github_issue_url'], 'https://github.com/studio/reviews/issues/42')
         self.assertNotIn('server-token', str(response.data))
         self.assertIn(f'mysticdie-review:{review.id}', mock_post.call_args.kwargs['json']['body'])
+        self.assertIn(f'[Open private studio review](https://studio.example/dashboard?view=Reviews&review={review.id})', mock_post.call_args.kwargs['json']['body'])
         self.assertEqual(mock_post.call_args.kwargs['timeout'], 10)
         self.assertFalse(mock_post.call_args.kwargs['allow_redirects'])
 

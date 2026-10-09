@@ -10,9 +10,7 @@ export default async function userVerify() {
 }
 
 export async function logout() {
-    try {
-        await api.post('/api/v1/user/logout/');
-    } catch {
-        // Cookies are cleared server-side on a best-effort basis; never block sign-out.
-    }
+    // HttpOnly cookies can only be cleared by the server. Do not pretend that
+    // sign-out succeeded if its request failed and the session is still active.
+    await api.post('/api/v1/user/logout/');
 }
