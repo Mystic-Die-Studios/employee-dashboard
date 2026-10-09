@@ -8,6 +8,23 @@ const api = axios.create({
 
 let isRefreshing = false;
 let refreshQueue = [];
+let csrfTokenPromise;
+
+api.interceptors.request.use(async (config) => {
+  if (!['get', 'head', 'options'].includes((config.method || 'get').toLowerCase())) {
+    // Fetch with plain axios to avoid recursively entering this interceptor.
+    if (!csrfTokenPromise) {
+      csrfTokenPromise = axios.get(`${API_BASE_URL}/api/v1/user/csrf/`, {
+        withCredentials: true,
+      }).then(({ data }) => data.csrfToken).catch((error) => {
+        csrfTokenPromise = undefined;
+        throw error;
+      });
+    }
+    config.headers['X-CSRFToken'] = await csrfTokenPromise;
+  }
+  return config;
+});
 
 api.interceptors.response.use(
   (response) => response,
@@ -16,6 +33,7 @@ api.interceptors.response.use(
 
     if (
       error.response?.status !== 401 ||
+      !originalRequest ||
       originalRequest._retry ||
       originalRequest.url.includes('/token/refresh/')
     ) {

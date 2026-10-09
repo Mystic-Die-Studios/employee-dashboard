@@ -32,6 +32,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/v1/test/', connection_test),
     path('api/v1/user/', include('user_app.urls')),
+    path('api/v1/workspace/', include('documentation_app.urls')),
     # Keep this last: it matches anything the routes above did not.
     re_path(r'^(?!api/|admin/|static/).*$', spa_index, name='spa_index'),
 ]

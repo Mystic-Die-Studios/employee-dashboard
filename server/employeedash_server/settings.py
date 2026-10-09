@@ -80,7 +80,7 @@ MIDDLEWARE = [
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
+    'user_app.middleware.CookieApiCsrfMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
@@ -158,6 +158,11 @@ USE_TZ = True
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
+# Artwork is private: never expose MEDIA_ROOT through a public web alias.
+MEDIA_ROOT = Path(os.getenv('REVIEW_MEDIA_ROOT') or BASE_DIR / 'private_uploads')
+REVIEW_UPLOAD_MAX_BYTES = int(os.getenv('REVIEW_UPLOAD_MAX_BYTES') or 50 * 1024 * 1024)
+DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'
+
 STORAGES = {
     'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
     'staticfiles': {'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage'},
@@ -208,6 +213,7 @@ AUTH_COOKIE_SAMESITE = os.getenv('AUTH_COOKIE_SAMESITE', 'Lax').strip() or 'Lax'
 SESSION_COOKIE_SECURE = AUTH_COOKIE_SECURE
 SESSION_COOKIE_HTTPONLY = env_bool('SESSION_COOKIE_HTTPONLY', True)
 CSRF_COOKIE_SECURE = env_bool('CSRF_COOKIE_SECURE', not DEBUG)
+CSRF_COOKIE_SAMESITE = AUTH_COOKIE_SAMESITE
 
 # cPanel terminates TLS at Apache/LiteSpeed and forwards over plain http, so
 # Django needs the forwarded header to know the request was really https.
