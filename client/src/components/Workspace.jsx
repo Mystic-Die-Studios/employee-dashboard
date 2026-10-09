@@ -397,9 +397,9 @@ export default function Workspace({ user, onLogout, preview = false }) {
         className={`workspace-sidebar ${menuOpen ? "is-open" : ""}`}
       >
         <a className="studio-brand" href={preview ? "/preview" : "/dashboard"}>
-          <span className="brand-mark">✦</span>
-          <span>
-            MYSTIC DIE<small>STUDIO WORKSPACE</small>
+          <img className="brand-mark" src="/studio-die.svg" alt="" />
+          <span className="studio-wordmark">
+            MYSTIC DIE<small>STUDIOS</small>
           </span>
         </a>
         <div className="workspace-switch">
@@ -583,27 +583,12 @@ export default function Workspace({ user, onLogout, preview = false }) {
                   </button>
                 </div>
                 <div className="hero-art" aria-hidden="true">
-                  <div className="orbit orbit-one" />
-                  <div className="orbit orbit-two" />
-                  <div className="art-spark spark-one">✧</div>
-                  <div className="art-spark spark-two">✦</div>
-                  <div className="art-card art-card-back">
-                    <span>✦</span>
-                    <div />
-                    <div />
-                  </div>
-                  <div className="art-card art-card-front">
-                    <span className="art-emblem">◈</span>
-                    <small>AN IDEA WORTH MAKING</small>
-                    <strong>
-                      Something
-                      <br />
-                      extraordinary.
-                    </strong>
-                    <div className="art-line" />
-                    <span className="art-avatar">M</span>
-                    <span className="art-avatar second">D</span>
-                  </div>
+                  <div className="die-orbit die-orbit-one" />
+                  <div className="die-orbit die-orbit-two" />
+                  <div className="die-glow" />
+                  <img className="hero-die" src="/studio-die.svg" alt="" />
+                  <span className="die-spark die-spark-one">✦</span>
+                  <span className="die-spark die-spark-two">✧</span>
                 </div>
               </section>
               <div className="stats-row">

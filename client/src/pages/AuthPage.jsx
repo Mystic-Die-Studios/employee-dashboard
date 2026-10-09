@@ -42,14 +42,13 @@ export default function AuthPage() {
   return (
     <div className="studio-auth flex min-h-screen items-center justify-center px-6 font-sans">
       <section className="studio-auth-card w-full max-w-md rounded-3xl border p-10 text-center">
-        <div
-          className="studio-auth-mark mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-2xl text-3xl"
-          aria-hidden="true"
-        >
-          ✦
-        </div>
-        <p className="studio-auth-eyebrow mb-3 text-xs font-semibold tracking-[0.18em]">
-          MYSTIC DIE STUDIOS
+        <img
+          src="/studio-die.svg"
+          className="studio-auth-mark mx-auto mb-3"
+          alt=""
+        />
+        <p className="studio-wordmark studio-auth-wordmark">
+          MYSTIC DIE<small>STUDIOS</small>
         </p>
         <h1 className="text-3xl font-semibold tracking-tight">
           A little magic.
