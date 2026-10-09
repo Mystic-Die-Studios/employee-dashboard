@@ -40,47 +40,47 @@ export default function AuthPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#f6f5fa] px-6 font-sans text-[#28243b]">
-      <section className="w-full max-w-md rounded-3xl border border-[#e7e3ee] bg-white p-10 text-center shadow-sm">
+    <div className="studio-auth flex min-h-screen items-center justify-center px-6 font-sans">
+      <section className="studio-auth-card w-full max-w-md rounded-3xl border p-10 text-center">
         <div
-          className="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#ede6fc] text-3xl text-[#7455b8]"
+          className="studio-auth-mark mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-2xl text-3xl"
           aria-hidden="true"
         >
           ✦
         </div>
-        <p className="mb-3 text-xs font-semibold tracking-[0.18em] text-[#7455b8]">
+        <p className="studio-auth-eyebrow mb-3 text-xs font-semibold tracking-[0.18em]">
           MYSTIC DIE STUDIOS
         </p>
         <h1 className="text-3xl font-semibold tracking-tight">
           A little magic.
           <br />A lot of making.
         </h1>
-        <p className="my-6 text-sm leading-6 text-[#797386]">
+        <p className="studio-auth-description my-6 text-sm leading-6">
           Welcome to your studio workspace. Sign in with your organization’s
           GitHub account to get started.
         </p>
         {error && (
           <p
             data-testid="auth-error"
-            className="text-red-600 max-w-md text-center"
+            className="studio-auth-error max-w-md text-center"
           >
             {ERROR_MESSAGES[error] || "Login failed. Please try again."}
           </p>
         )}
         <button
           data-testid="github-login-btn"
-          className="w-full rounded-xl bg-[#7455b8] px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-[#62449f] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#7455b8]"
+          className="studio-auth-button w-full rounded-xl px-5 py-3 text-sm font-medium transition-colors"
           onClick={handleLogin}
         >
           Login with GitHub
         </button>
         <Link
           to="/preview"
-          className="mt-5 inline-block text-sm font-medium text-[#7455b8] hover:underline"
+          className="studio-auth-link mt-5 inline-block text-sm font-medium hover:underline"
         >
           Explore the frontend preview →
         </Link>
-        <p className="mt-8 text-xs text-[#9993a4]">
+        <p className="studio-auth-footer mt-8 text-xs">
           Projects, people, and possibilities. Together.
         </p>
       </section>

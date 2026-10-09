@@ -1,1 +1,71 @@
 @import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+  --studio-bg: #09090f;
+  --studio-panel: #14121d;
+  --studio-border: #2b243a;
+  --studio-text: #f2eefc;
+  --studio-muted: #b5adc7;
+  --studio-accent: #7c3aed;
+  --studio-accent-hover: #6d28d9;
+  --studio-accent-soft: #241a38;
+  --studio-accent-text: #c4b5fd;
+  background: var(--studio-bg);
+  color: var(--studio-text);
+}
+
+body {
+  margin: 0;
+  background: var(--studio-bg);
+}
+
+::selection {
+  background: #7c3aed66;
+  color: #ffffff;
+}
+
+.studio-auth {
+  background: radial-gradient(ellipse at top, #251335 0%, var(--studio-bg) 65%);
+  color: var(--studio-text);
+}
+
+.studio-auth-card {
+  border-color: var(--studio-border);
+  background: var(--studio-panel);
+  box-shadow: 0 24px 80px #00000066, 0 0 50px #7c3aed0c;
+}
+
+.studio-auth-mark {
+  background: var(--studio-accent-soft);
+  color: var(--studio-accent-text);
+  box-shadow: 0 0 28px #7c3aed22;
+}
+
+.studio-auth-eyebrow,
+.studio-auth-link {
+  color: var(--studio-accent-text);
+}
+
+.studio-auth-description,
+.studio-auth-footer {
+  color: var(--studio-muted);
+}
+
+.studio-auth-error {
+  color: #fda4af;
+}
+
+.studio-auth-button {
+  background: var(--studio-accent);
+  color: #ffffff;
+}
+
+.studio-auth-button:hover {
+  background: var(--studio-accent-hover);
+}
+
+.studio-auth :is(button, a):focus-visible {
+  outline: 2px solid var(--studio-accent-text);
+  outline-offset: 4px;
+}
