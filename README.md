@@ -10,7 +10,9 @@
 ![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=for-the-badge&logo=docker&logoColor=white)
 ![JWT](https://img.shields.io/badge/JWT-black?style=for-the-badge&logo=JSON%20web%20tokens)
 
-The Employee Dashboard is Mystic Die Studios' internal portal for employees. It centralizes authentication and will eventually host documentation and other internal tools. The project is in early development — the auth flow is functional, and the dashboard is a minimal shell with more features planned.
+The Employee Dashboard is Mystic Die Studios' internal portal: GitHub organization login, a dark studio workspace, a shared Markdown wiki, project tasks, and private artwork review tickets. `/dashboard` uses the Django database; `/preview` is a marked, browser-local demo for showing the frontend without signing in.
+
+The interface is custom React code inspired by AppFlowy/Notion. It does **not** embed or fork AppFlowy's Flutter/Rust application, or run an AppFlowy-Web/Cloud instance.
 
 ---
 
@@ -42,23 +44,32 @@ The Employee Dashboard is Mystic Die Studios' internal portal for employees. It 
 ## Features
 
 **Authentication**
-- **GitHub OAuth login** — Employees sign in with GitHub (`user:email` scope); the backend exchanges the OAuth code and fetches the verified email and username
+
+- **GitHub OAuth login** — Employees sign in with GitHub (`user:email` and `read:org` scopes); active organization membership is checked before granting access
 - **JWT cookie auth** — Access and refresh tokens are stored in HttpOnly cookies (`access_token`, `refresh_token`) via SimpleJWT
 - **Admin login** — Admins can authenticate with email and password through the API
 - **Role-based users** — Users are assigned an `admin` or `employee` role
 - **Token refresh** — Expired access tokens can be refreshed using the refresh cookie
 
 **Dashboard**
-- **Main Hub** — Will be the source of announcements and other important info as well as where users navigate to other features based on their auth level
+
+- **Main Hub** — Home, projects, wiki, personal tasks, reviews, and team navigation
 - **Protected route** — `/dashboard` requires an authenticated session; unauthenticated users are redirected to `/`
-- **Welcome view** — Displays a personalized greeting using the user's GitHub username
+- **Markdown wiki** — Safe rendered Markdown, explicit database saves, and version conflicts that preserve unsaved drafts
+- **Tabs and backtracking** — Workspace sections and document tabs with URL-based navigation
+- **Project tasks** — Database-backed tasks and status updates; creators, assignees, or admins can edit tasks
+- **Artist reviews** — Private upload creates a durable ticket with stored feedback. Admins can approve/request changes, but cannot approve their own upload
+- **GitHub issue mirror** — Optional server-side integration. Local tickets work when GitHub is unconfigured or unavailable
 - **Logout** — Clears auth cookies and returns the user to the login page
 
 
-**Planned (not yet implemented)**
-- Employee create/login/logout endpoints (stubbed in the backend, just need copy paste from admin and role adjustments)
-- GitHub org membership validation before user creation (Drop-in location indicated in GitHub callback view)
-- `documentation_app` — internal documentation and resource features
+**Security boundaries**
+
+- Workspace APIs and file downloads require an active authenticated user
+- Unsafe API calls require CSRF tokens, including login, refresh, and logout
+- Admin provisioning is restricted to existing admins/superusers
+- Uploads have extension, signature and size checks; randomized private paths; attachment-only downloads
+- Markdown does not execute raw HTML or load arbitrary external images
 
 ---
 
@@ -84,7 +95,7 @@ employee-dashboard/
 ├── client/                   # React frontend (Vite)
 ├── server/                   # Django backend
 │   ├── user_app/             # Auth + user model
-│   ├── documentation_app/    # Scaffold (future docs)
+│   ├── documentation_app/    # Wiki, tasks, artwork tickets and feedback
 │   └── passenger_wsgi.py     # cPanel/Passenger entrypoint
 ├── deploy/
 │   ├── cpanel_deploy.sh      # Build, migrate, restart on the host
@@ -146,10 +157,11 @@ employee-dashboard/
 5. **Create an admin** (optional)
 
    ```bash
-   curl -X POST http://localhost:8000/api/v1/user/create/admin/ \
-     -H "Content-Type: application/json" \
-     -d '{"email": "admin@example.com", "password": "your-password"}'
+   docker exec -it dashserver-container python manage.py createsuperuser
    ```
+
+   GitHub reviewers can instead be listed in `ADMIN_GITHUB_USERNAMES`.
+   Anonymous admin creation is intentionally disabled.
 
 6. **Access the app**
 
@@ -207,6 +219,10 @@ Copy `.env.example` to `.env` and fill in the following:
 | `SECURE_SSL_REDIRECT` | Redirect http to https in Django. Off by default — usually handled by the host |
 | `SECURE_HSTS_SECONDS` | `0` (off). Opt in only once https is confirmed; browsers cache it |
 | `FRONTEND_DIST_DIR` | Override the location of the built React app. Auto-detected otherwise |
+| `REVIEW_GITHUB_REPOSITORY` | Optional `organization/repository` for issue mirroring; blank until chosen |
+| `REVIEW_GITHUB_TOKEN` | Server-only fine-grained token with Issues read/write for that repository |
+| `REVIEW_MEDIA_ROOT` | Private upload directory; defaults to `server/private_uploads`. Never serve publicly |
+| `REVIEW_UPLOAD_MAX_BYTES` | Upload limit, default `52428800` (50 MiB) |
 
 For production values see [`deploy/env.production.example`](deploy/env.production.example)
 and [Deploying to cPanel](#deploying-to-cpanel).
@@ -233,12 +249,27 @@ All endpoints are prefixed with `/api/v1/`.
 | GET | `/test/` | None | Health check — returns `{"connected": true}` |
 | GET | `/user/github/login/` | None | Starts OAuth: mints a CSRF `state` and redirects to GitHub |
 | GET | `/user/github/callback/` | None | GitHub OAuth callback; verifies org membership, sets JWT cookies, redirects to `/dashboard` |
-| POST | `/user/create/admin/` | None | Create an admin user |
+| GET | `/user/csrf/` | None | Sets a CSRF cookie and returns a masked token |
+| POST | `/user/create/admin/` | Admin cookie JWT | Provision another admin without replacing the current session |
 | POST | `/user/admin/login/` | None | Admin email/password login |
 | POST | `/user/logout/` | None | Clear auth cookies |
 | POST | `/user/admin/logout/` | None | Alias of `/user/logout/` |
 | GET | `/user/info/` | Cookie JWT | Returns current user profile |
 | POST | `/user/token/refresh/` | Refresh cookie | Issue new access/refresh cookies |
+| GET | `/workspace/` | Cookie JWT | Wiki pages, tasks, reviews and active members |
+| GET, POST | `/workspace/documents/` | Cookie JWT | List or create Markdown pages |
+| GET, PATCH, DELETE | `/workspace/documents/<id>/` | Cookie JWT | Read, save with `version`, or delete owned/admin page |
+| GET, POST | `/workspace/tasks/` | Cookie JWT | List or create tasks |
+| PATCH | `/workspace/tasks/<id>/` | Owner/assignee/admin | Edit a task |
+| GET, POST | `/workspace/reviews/` | Cookie JWT | List tickets or upload artwork (`multipart/form-data`) |
+| GET | `/workspace/reviews/<id>/` | Cookie JWT | Ticket and stored feedback |
+| GET | `/workspace/reviews/<id>/file/` | Cookie JWT | Download private attachment |
+| POST | `/workspace/reviews/<id>/feedback/` | Cookie JWT | Comment; admins can approve/request changes |
+| POST | `/workspace/reviews/<id>/github/` | Artist/admin | Retry optional GitHub synchronization |
+
+All POST/PATCH/DELETE calls also require `X-CSRFToken` and its cookie. Fetch
+`/user/csrf/` first with cookie credentials; React does this automatically. A
+stale wiki `version` returns HTTP 409, never an overwrite.
 
 The callback is reached by a top-level browser redirect, so it never answers with
 JSON. Every failure sends the browser back to `FRONTEND_URL/?error=<code>`:
@@ -250,6 +281,7 @@ JSON. Every failure sends the browser back to `FRONTEND_URL/?error=<code>`:
 | `github_denied` | User declined on GitHub's consent screen |
 | `invalid_state` | Missing or mismatched `state` — a stale tab, or a forged callback |
 | `no_verified_email` | No verified email address on the GitHub account |
+| `account_disabled` | A studio admin disabled the local account |
 | `token_exchange_failed` / `github_profile_failed` / `no_code` | GitHub handshake failed |
 
 ### Authentication flow
@@ -288,9 +320,11 @@ gets a row in the database.
 
 ## Admin Workflow
 
-Admin setup is done by hitting the API endpoints directly (e.g. via Postman or curl). There is no admin-facing UI yet.
+Bootstrap with `python manage.py createsuperuser`, or grant GitHub reviewers the
+admin role via `ADMIN_GITHUB_USERNAMES`. Studio admins get decision controls in
+Reviews. Django's `/admin/` is available to staff/superusers.
 
-1. **Create an admin** — `POST /api/v1/user/create/admin/` with `email`, `password`, and optional `username` / `github_username`
+1. **Provision another admin** — Authenticated admins can `POST /api/v1/user/create/admin/` with a CSRF token, `email`, `password`, and optional `username` / `github_username`
 2. **Log in** — `POST /api/v1/user/admin/login/` with `email` and `password`
 3. **Verify session** — `GET /api/v1/user/info/` returns the authenticated user's profile
 4. **Log out** — `POST /api/v1/user/admin/logout/`
@@ -302,14 +336,29 @@ Admin setup is done by hitting the API endpoints directly (e.g. via Postman or c
 1. Navigate to `http://localhost:5173`
 2. Click **Login with GitHub**
 3. Authorize the app on GitHub
-4. After OAuth completes, you land on `/dashboard` — currently a placeholder landing page
+4. After OAuth completes, you land on `/dashboard` and open the wiki, tasks, or Reviews
 
 Sign-in requires active membership of the org named by `GITHUB_ORG`; anyone else is
 bounced back to the login page with an explanation. New users get the `employee`
 role unless their GitHub username is listed in `ADMIN_GITHUB_USERNAMES`.
 
-> **Note:** Employee-specific create/login endpoints are not wired up yet, and the
-> dashboard itself is still a placeholder.
+Employees are provisioned through GitHub login, not a separate password signup.
+All active members share this one studio workspace, including wiki pages and
+artwork. This is not a multi-organization or per-project permission system.
+
+### Artist review workflow
+
+1. Open Reviews, enter a title/project/brief, and upload a supported art file.
+2. The server saves a private attachment and creates an `ART-…` ticket.
+3. Employees leave comments. Admins can request changes or approve; each decision
+   and comment remains in the ticket history.
+4. If GitHub mirroring is configured, the ticket links to an issue and feedback
+   appears as comments. Approval closes the issue; requesting changes reopens it.
+
+Use a private repository for private studio work. Leave both mirror variables
+blank until the studio chooses a repository. Failed sync never discards tickets
+or feedback; artists/admins can retry. Stable markers avoid duplicate issues and
+comments on retries. Files themselves are not uploaded to GitHub.
 
 ---
 
@@ -542,7 +591,14 @@ runs migrations and `collectstatic`, and restarts Passenger by touching
 ### 7. Sign in
 
 Open `https://dashboard.mysticdie.com` and click **Login with GitHub**. You
-should land on the placeholder dashboard with your GitHub username and role.
+should land on the studio workspace with your GitHub username and role.
+
+The deploy script applies the workspace migration. Ensure the Passenger user
+can write to `REVIEW_MEDIA_ROOT`, and back up that directory **with the database**.
+Never put uploads under `frontend/`, `staticfiles/`, or the web document root.
+Keep secrets on the server and match Apache/Passenger's request limit to the
+application upload limit. Pushing `dev` does not itself deploy the running site;
+use the deployment steps above.
 
 If you get bounced back with `?error=...`, look the code up in
 [the callback error table](#api-reference) or in
@@ -573,11 +629,16 @@ If you get bounced back with `?error=...`, look the code up in
 
 ## Testing
 
-Backend tests cover the OAuth callback, the org gate, and the session endpoints:
+Backend tests cover OAuth/org access, CSRF, admin authorization, wiki/task
+persistence, private uploads, review decisions, and mocked GitHub synchronization:
 
 ```bash
-docker exec -it dashserver-container python manage.py test user_app
+cd server
+python manage.py test --settings=employeedash_server.test_settings
 ```
+
+Install `server/requirements.txt` first. These settings use isolated in-memory
+SQLite and disable live GitHub issue credentials. Production still uses MySQL.
 
 Cypress E2E tests live in `client/cypress/`.
 
@@ -587,6 +648,11 @@ cd client
 npm run cy:open    # Interactive Cypress UI
 npm run cy:run     # Headless run
 ```
+
+Run Vite locally (`npm run dev`) before Cypress. If your environment sets
+`ELECTRON_RUN_AS_NODE`, use `env -u ELECTRON_RUN_AS_NODE npm run cy:run`.
+Browser tests stub the API; Django tests validate the actual API/database.
+Also run `npm run build`, `npm run lint`, and `npm audit` in `client/`.
 
 **Docker** (testing profile):
 ```bash
@@ -599,9 +665,11 @@ docker compose -f docker-compose.dev.yaml --profile testing up
 
 The following features are scoped but not yet implemented:
 
-- **Real dashboard** — `/dashboard` is a placeholder landing page
-- **Employee endpoints** — Create and login flows for employee-role users
-- **`documentation_app`** — Internal documentation and resource features
+- **Real-time collaboration** — Wiki saves use version checks, not simultaneous collaborative editing
+- **AppFlowy hosting** — This custom workspace does not install AppFlowy-Web/Cloud
+- **Upload operations** — Add malware scanning, quotas, backups, and retention before handling untrusted files at scale
+- **Dedicated review permissions** — Review decisions currently use the studio admin role
+- **Session hardening** — Organization membership is checked at login; add periodic checks, admin login throttling, and refresh-token revocation. Logout currently clears browser cookies, not already-copied tokens
 - **Fix `docker-compose.yaml`** — Update `./frontend` references to `./client`
 - **Production deployment** — Nginx reverse proxy, SSL, and CI/CD pipeline
 

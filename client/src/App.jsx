@@ -1,13 +1,7 @@
-import { Outlet, useLoaderData } from 'react-router-dom';
-import { logout } from './helpers/authHelpers';
+import { Outlet, useLoaderData } from "react-router-dom";
+import { logout } from "./helpers/authHelpers";
 
 export default function App() {
-    const user = useLoaderData();
-    return (
-        <div>
-            <main>
-                <Outlet context={{ user, logout }} />
-            </main>
-        </div>
-    );
+  const user = useLoaderData();
+  return <Outlet context={{ user, logout }} />;
 }

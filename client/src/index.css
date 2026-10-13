@@ -1,1 +1,117 @@
 @import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+  --studio-bg: #050507;
+  --studio-panel: #101018;
+  --studio-border: #26243b;
+  --studio-text: #f5f5ff;
+  --studio-muted: #b4b6cb;
+  --studio-accent: #6546e5;
+  --studio-accent-hover: #5035c8;
+  --studio-accent-soft: #181633;
+  --studio-accent-text: #a9baff;
+  --studio-blue: #3aa8ff;
+  --studio-magenta: #ed43cc;
+  --studio-purple: #8c63ff;
+  background: var(--studio-bg);
+  color: var(--studio-text);
+}
+
+body {
+  margin: 0;
+  background: var(--studio-bg);
+}
+
+::selection {
+  background: #6546e566;
+  color: #ffffff;
+}
+
+.studio-auth {
+  background:
+    radial-gradient(ellipse at 15% 15%, #ed43cc15, transparent 50%),
+    radial-gradient(ellipse at 85% 80%, #3aa8ff15, transparent 50%),
+    var(--studio-bg);
+  color: var(--studio-text);
+}
+
+.studio-auth-card {
+  border-color: var(--studio-border);
+  background: var(--studio-panel);
+  background: linear-gradient(160deg, #111019, #090c14);
+  box-shadow:
+    0 24px 80px #00000099,
+    -10px -10px 45px #ed43cc09,
+    10px 10px 45px #3aa8ff09;
+}
+
+.studio-auth-mark {
+  width: 84px;
+  height: 88px;
+  filter: drop-shadow(-5px 0 12px #ed43cc33) drop-shadow(5px 0 12px #3aa8ff33);
+}
+
+.studio-wordmark {
+  display: block;
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 700;
+  letter-spacing: -0.6px;
+  line-height: 1.05;
+  color: var(--studio-text);
+  text-shadow:
+    -1px 0 #ed43cc44,
+    1px 0 #3aa8ff66;
+}
+
+.studio-wordmark small {
+  display: block;
+  font-family: inherit;
+  font-size: 0.68em;
+  letter-spacing: 0.05em;
+  line-height: 1.4;
+}
+
+.studio-auth-wordmark {
+  margin-bottom: 30px;
+  font-size: 29px;
+}
+
+.studio-auth-eyebrow,
+.studio-auth-link {
+  color: var(--studio-accent-text);
+}
+
+.studio-auth-description,
+.studio-auth-footer {
+  color: var(--studio-muted);
+}
+
+.studio-auth-error {
+  color: #fda4af;
+}
+
+.studio-auth-button {
+  background: linear-gradient(
+    110deg,
+    #9a268e,
+    var(--studio-accent) 55%,
+    #175fba
+  );
+  color: #ffffff;
+  box-shadow: 0 0 24px #6546e525;
+}
+
+.studio-auth-button:hover {
+  background: linear-gradient(
+    110deg,
+    #812078,
+    var(--studio-accent-hover) 55%,
+    #12509e
+  );
+}
+
+.studio-auth :is(button, a):focus-visible {
+  outline: 2px solid var(--studio-accent-text);
+  outline-offset: 4px;
+}
