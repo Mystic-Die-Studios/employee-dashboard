@@ -100,7 +100,7 @@ def github_api(access_token, path):
             f'https://api.github.com{path}',
             headers={
                 'Accept': 'application/vnd.github+json',
-                'Authorization': f'Bearer {access_token}',
+                'Authorization': 'Bearer ' + str(access_token),
                 'X-GitHub-Api-Version': '2022-11-28',
             },
             timeout=GITHUB_TIMEOUT,
@@ -143,7 +143,7 @@ def check_github_org_membership(access_token, org):
     """
     status_code, body = github_api(access_token, f'/user/memberships/orgs/{org}')
 
-    if status_code in (403, 404):
+    if status_code == 404:
         return 'not_member'
     if status_code != 200 or not isinstance(body, dict):
         return 'error'
