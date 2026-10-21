@@ -2,6 +2,7 @@ from django.urls import path
 from .views import *
 
 urlpatterns = [
+    path('csrf/', CsrfTokenView.as_view(), name='csrf_token'),
     path('create/admin/', CreateAdminUserView.as_view(), name='create_admin_user'),
     path('github/login/', GitHubLoginView.as_view(), name='github_login'),
     path('github/callback/', GitHubCallBackView.as_view(), name='github_callback'),

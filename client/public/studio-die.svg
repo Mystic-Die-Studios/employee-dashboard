@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 132" fill="none">
+  <defs>
+    <linearGradient id="edge" x1="12" y1="18" x2="116" y2="106" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ed43cc"/>
+      <stop offset=".45" stop-color="#8c63ff"/>
+      <stop offset="1" stop-color="#3aa8ff"/>
+    </linearGradient>
+    <linearGradient id="facet" x1="20" y1="40" x2="107" y2="100" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#bd2aaf"/>
+      <stop offset=".5" stop-color="#6546e5"/>
+      <stop offset="1" stop-color="#147ad8"/>
+    </linearGradient>
+  </defs>
+  <path d="M64 6 116 36v60l-52 30L12 96V36Z" fill="#080811" stroke="url(#edge)" stroke-width="2"/>
+  <path d="m64 11 47 28v54l-47 28-47-28V39Z" stroke="url(#facet)" stroke-width=".8"/>
+  <g stroke="url(#facet)" stroke-width="1.1" stroke-linejoin="round">
+    <path d="m64 25 38 20v45l-38 19-38-19V45Z"/>
+    <path d="M64 25 26 90h76ZM26 45l38 64 38-64Z"/>
+    <path d="M64 6v19M12 36l14 9m90-9-14 9M12 96l14-6m90 6-14-6m-38 36v-17"/>
+    <path d="M26 45h76M26 90l38-65 38 65" opacity=".55"/>
+  </g>
+  <text x="64" y="77" fill="#3aa8ff" font-family="Georgia,serif" font-size="17" text-anchor="middle">8</text>
+</svg>
