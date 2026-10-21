@@ -143,7 +143,7 @@ def check_github_org_membership(access_token, org):
     """
     status_code, body = github_api(access_token, f'/user/memberships/orgs/{org}')
 
-    if status_code in (403, 404):
+    if status_code == 404:
         return 'not_member'
     if status_code != 200 or not isinstance(body, dict):
         return 'error'
