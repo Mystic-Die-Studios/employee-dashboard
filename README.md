@@ -276,8 +276,8 @@ JSON. Every failure sends the browser back to `FRONTEND_URL/?error=<code>`:
 
 | Code | Meaning |
 |---|---|
-| `not_org_member` | Authenticated, but not an active member of `GITHUB_ORG` |
-| `org_check_failed` | GitHub would not report membership — usually an org that has not approved this OAuth app |
+| `not_org_member` | GitHub confirmed the account is not an active member of `GITHUB_ORG` |
+| `org_check_failed` | GitHub could not confirm membership (for example, a forbidden lookup or an org that has not approved this OAuth app) |
 | `github_denied` | User declined on GitHub's consent screen |
 | `invalid_state` | Missing or mismatched `state` — a stale tab, or a forged callback |
 | `no_verified_email` | No verified email address on the GitHub account |

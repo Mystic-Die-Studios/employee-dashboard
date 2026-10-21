@@ -148,6 +148,17 @@ class GitHubCallbackViewTests(TestCase):
         self.assertEqual(response['Location'], 'http://localhost:5173/?error=org_check_failed')
         self.assertFalse(User.objects.exists())
 
+    @patch('user_app.auth_utils.requests.get')
+    @patch('user_app.auth_utils.requests.post')
+    def test_forbidden_membership_lookup_is_not_treated_as_non_membership(self, mock_post, mock_get):
+        mock_post.return_value = FakeResponse(200, {'access_token': 'gh-token'})
+        mock_get.side_effect = self.github_responses(membership_status=403)
+
+        response = self.callback()
+
+        self.assertEqual(response['Location'], 'http://localhost:5173/?error=org_check_failed')
+        self.assertFalse(User.objects.exists())
+
     def test_state_mismatch_is_rejected_before_any_github_call(self):
         with patch('user_app.auth_utils.requests.post') as mock_post:
             response = self.callback(state='attacker-supplied-state')
