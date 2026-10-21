@@ -3,7 +3,7 @@ from unittest.mock import patch
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from .auth_utils import OAUTH_STATE_COOKIE
+from .auth_utils import OAUTH_STATE_COOKIE, github_api
 from .models import User
 
 
@@ -73,6 +73,18 @@ class GitHubCallbackViewTests(TestCase):
     def callback(self, **params):
         query = {'code': 'the-code', 'state': self.STATE, **params}
         return self.client.get(reverse('github_callback'), query)
+
+    @patch('user_app.auth_utils.requests.get')
+    def test_github_api_uses_oauth_token_for_authentication(self, mock_get):
+        mock_get.return_value = FakeResponse(200, {'state': 'active'})
+
+        response = github_api('gh-token', '/user/memberships/orgs/Mystic-Die-Studios')
+
+        self.assertEqual(response, (200, {'state': 'active'}))
+        self.assertEqual(
+            mock_get.call_args.kwargs['headers']['Authorization'],
+            'Bearer ' + 'gh-token',
+        )
 
     @patch('user_app.auth_utils.requests.get')
     @patch('user_app.auth_utils.requests.post')
