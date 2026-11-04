@@ -166,6 +166,8 @@ if command -v npm >/dev/null 2>&1; then
     # already-set NODE_ENV. Left alone that ships React's development build:
     # ~60% larger, slower, and full of dev-only warnings.
     export NODE_ENV=production
+    # Avoid V8's large WebAssembly virtual-memory reservation on shared hosting.
+    export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--disable-wasm-trap-handler"
     (
         cd "$REPO_DIR/client"
         # Build tools are devDependencies, including when NODE_ENV=production.
