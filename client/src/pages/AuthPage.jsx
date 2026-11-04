@@ -52,12 +52,10 @@ export default function AuthPage() {
           MYSTIC DIE<small>STUDIOS</small>
         </p>
         <h1 className="text-3xl font-semibold tracking-tight">
-          A little magic.
-          <br />A lot of making.
+          Studio sign in
         </h1>
         <p className="studio-auth-description my-6 text-sm leading-6">
-          Welcome to your studio workspace. Sign in with your organization’s
-          GitHub account to get started.
+          Sign in with a GitHub account that belongs to Mystic Die Studios.
         </p>
         {error && (
           <p
@@ -78,11 +76,8 @@ export default function AuthPage() {
           to="/preview"
           className="studio-auth-link mt-5 inline-block text-sm font-medium hover:underline"
         >
-          Explore the frontend preview →
+          Open demo workspace →
         </Link>
-        <p className="studio-auth-footer mt-8 text-xs">
-          Projects, people, and possibilities. Together.
-        </p>
       </section>
     </div>
   );
