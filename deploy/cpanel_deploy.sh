@@ -136,7 +136,26 @@ fi
 
 say "Building the frontend"
 if command -v npm >/dev/null 2>&1; then
-    echo "Using npm $(npm -v) from $(dirname "$(command -v npm)")"
+    # CloudLinux nodevenv wraps npm and appends --prefix <nodevenv>/lib.
+    # That overrides the project directory even after cd, so npm ci cannot
+    # find its lockfile. Invoke the runtime's npm CLI directly instead.
+    NODE_EXECUTABLE="$(node -p 'process.execPath')"
+    NPM_CLI="$("$NODE_EXECUTABLE" -e '
+        const fs = require("fs");
+        const path = require("path");
+        const runtime = path.dirname(process.execPath);
+        const candidates = [
+            path.resolve(runtime, "../lib/node_modules/npm/bin/npm-cli.js"),
+            path.resolve(runtime, "../node_modules/npm/bin/npm-cli.js"),
+        ];
+        const cli = candidates.find(candidate => fs.existsSync(candidate));
+        if (!cli) process.exit(1);
+        process.stdout.write(cli);
+    ')" || {
+        echo "ERROR: cannot locate npm-cli.js beside $NODE_EXECUTABLE." >&2
+        exit 1
+    }
+    echo "Using npm $("$NODE_EXECUTABLE" "$NPM_CLI" --version) via $NPM_CLI"
     # Cypress pulls a ~200 MB binary from a postinstall hook. The server never
     # runs the E2E suite, and on a shared host that download is the single most
     # common reason this step appears to hang.
@@ -147,7 +166,12 @@ if command -v npm >/dev/null 2>&1; then
     # already-set NODE_ENV. Left alone that ships React's development build:
     # ~60% larger, slower, and full of dev-only warnings.
     export NODE_ENV=production
-    ( cd "$REPO_DIR/client" && npm ci --no-audit --no-fund --loglevel=http && npm run build )
+    (
+        cd "$REPO_DIR/client"
+        # Build tools are devDependencies, including when NODE_ENV=production.
+        "$NODE_EXECUTABLE" "$NPM_CLI" --prefix "$REPO_DIR/client" ci --include=dev --no-audit --no-fund --loglevel=http
+        "$NODE_EXECUTABLE" "$NPM_CLI" --prefix "$REPO_DIR/client" run build
+    )
     cp -Rf "$REPO_DIR/client/dist/." "$APPROOT/frontend/"
 elif [ -d "$REPO_DIR/client/dist" ]; then
     echo "npm not found; using the client/dist committed to the repo."
