@@ -147,6 +147,106 @@ function documentExcerpt(body) {
     .slice(0, 100);
 }
 
+// Line-based formats: the marker each one adds, and the pattern that recognizes it.
+const LINE_FORMATS = {
+  heading: { prefix: () => "## ", pattern: /^#{1,6}\s+/ },
+  quote: { prefix: () => "> ", pattern: /^>\s?/ },
+  bullets: { prefix: () => "- ", pattern: /^[-*+]\s+(?!\[[ xX]\]\s)/, list: true },
+  numbers: { prefix: (i) => `${i + 1}. `, pattern: /^\d+[.)]\s+/, list: true },
+  checklist: { prefix: () => "- [ ] ", pattern: /^[-*+]\s+\[[ xX]\]\s+/, list: true },
+};
+const ANY_LIST_MARKER = /^([-*+]\s+\[[ xX]\]\s+|[-*+]\s+|\d+[.)]\s+)/;
+const WRAP_FORMATS = { bold: ["**", "bold text"], italic: ["_", "italic text"], code: ["`", "code"] };
+
+// Works out one toolbar edit: replace value[from, to) with `text`, then select
+// [selectStart, selectEnd). Pure, so it can be tested without a browser.
+function formatMarkdown(action, value, start, end) {
+  const selected = value.slice(start, end);
+  if (action === "code" && selected.includes("\n")) {
+    const block = `\`\`\`\n${selected.replace(/\n$/, "")}\n\`\`\``;
+    return padBlock(value, start, end, block, 4, 4 + selected.replace(/\n$/, "").length);
+  }
+  if (WRAP_FORMATS[action]) {
+    const [marker, placeholder] = WRAP_FORMATS[action];
+    const m = marker.length;
+    // Keep markers next to the words: "**word** " not "**word **".
+    const lead = selected.length - selected.trimStart().length;
+    const trail = selected.length - selected.trimEnd().length;
+    const from = selected.trim() ? start + lead : start;
+    const to = selected.trim() ? end - trail : end;
+    const inner = value.slice(from, to);
+    if (inner.length >= 2 * m && inner.startsWith(marker) && inner.endsWith(marker)) {
+      const text = inner.slice(m, -m);
+      return { from, to, text, selectStart: from, selectEnd: from + text.length };
+    }
+    if (from >= m && value.slice(from - m, from) === marker && value.slice(to, to + m) === marker) {
+      return { from: from - m, to: to + m, text: inner, selectStart: from - m, selectEnd: from - m + inner.length };
+    }
+    const text = inner || placeholder;
+    return { from, to, text: `${marker}${text}${marker}`, selectStart: from + m, selectEnd: from + m + text.length };
+  }
+  if (action === "link") {
+    if (/^https?:\/\/\S+$/.test(selected.trim())) {
+      return { from: start, to: end, text: `[link text](${selected.trim()})`, selectStart: start + 1, selectEnd: start + 10 };
+    }
+    const label = selected || "link text";
+    const text = `[${label}](https://)`;
+    return { from: start, to: end, text, selectStart: start + label.length + 3, selectEnd: start + text.length - 1 };
+  }
+  const format = LINE_FORMATS[action];
+  if (!format) return null;
+  // Whole lines touched by the selection; a selection ending at a line start skips that line.
+  const lastChar = end > start && value[end - 1] === "\n" ? end - 1 : end;
+  const from = value.lastIndexOf("\n", start - 1) + 1;
+  const lineEnd = value.indexOf("\n", lastChar);
+  const to = lineEnd === -1 ? value.length : lineEnd;
+  const lines = value.slice(from, to).split("\n");
+  const filled = lines.filter((line) => line.trim());
+  const remove = filled.length > 0 && filled.every((line) => format.pattern.test(line));
+  let count = 0;
+  const changed = lines.map((line) => {
+    if (remove) return line.replace(format.pattern, "");
+    if (!line.trim() && lines.length > 1) return line;
+    const bare = format.list ? line.replace(ANY_LIST_MARKER, "") : line.replace(format.pattern, "");
+    return format.prefix(count++) + bare;
+  });
+  const text = changed.join("\n");
+  if (start === end && lines.length === 1) {
+    const cursor = Math.max(from, start + (changed[0].length - lines[0].length));
+    return { from, to, text, selectStart: cursor, selectEnd: cursor };
+  }
+  return { from, to, text, selectStart: from, selectEnd: from + text.length };
+}
+
+// Puts block content (images, code blocks) on its own lines, adding line breaks only where needed.
+function padBlock(value, start, end, block, innerStart = block.length, innerEnd = block.length) {
+  const before = value.slice(0, start);
+  const after = value.slice(end);
+  const lead = before && !before.endsWith("\n") ? "\n" : "";
+  const trail = after && !after.startsWith("\n") ? "\n" : "";
+  return { from: start, to: end, text: `${lead}${block}${trail}`, selectStart: start + lead.length + innerStart, selectEnd: start + lead.length + innerEnd };
+}
+
+const MOD_KEY = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
+const TOOLBAR = [
+  ["bold", "Bold", `${MOD_KEY}B`],
+  ["italic", "Italic", `${MOD_KEY}I`],
+  ["heading", "Heading"],
+  ["link", "Link", `${MOD_KEY}K`],
+  ["bullets", "Bulleted list"],
+  ["numbers", "Numbered list"],
+  ["checklist", "Checklist"],
+  ["code", "Code"],
+  ["quote", "Quote"],
+];
+const SHORTCUTS = { b: "bold", i: "italic", k: "link" };
+
+// Pages created outside the editor get the model's default icon name ("file-text"),
+// which would show as text. Only show real symbols (one or two characters).
+function pageIcon(icon) {
+  return icon && Array.from(icon).length <= 2 ? icon : "▤";
+}
+
 // Guards against dropping a whole folder of files by accident.
 const MAX_IMAGES_AT_ONCE = 10;
 
@@ -204,6 +304,22 @@ function Icon({ name, size = 20 }) {
       <>
         <circle cx="10" cy="10" r="6" />
         <path d="m15 15 6 6" />
+      </>
+    ),
+    bold: <path d="M7 5h6a3.5 3.5 0 0 1 0 7H7Zm0 7h7a3.5 3.5 0 0 1 0 7H7Z" />,
+    italic: <path d="M10 5h8M6 19h8M14 5l-4 14" />,
+    heading: <path d="M6 5v14M17 5v14M6 12h11" />,
+    link: <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />,
+    bullets: <path d="M10 6h10M10 12h10M10 18h10M4.5 6h.01M4.5 12h.01M4.5 18h.01" />,
+    numbers: <path d="M10 6h10M10 12h10M10 18h10M4 5l1.5-1v5M3.5 14.5a1.5 1.5 0 0 1 3 .5L3.5 19h3" />,
+    checklist: <path d="m3.5 6.5 1.5 1.5 3-3M3.5 16.5l1.5 1.5 3-3M11 7h9M11 17h9" />,
+    code: <path d="m8 7-5 5 5 5M16 7l5 5-5 5" />,
+    quote: <path d="M5 5v14M9 8h10M9 12h10M9 16h7" />,
+    image: (
+      <>
+        <rect x="3" y="5" width="18" height="14" rx="2" />
+        <path d="m3 16 5-5 4 4 2.5-2.5L21 18" />
+        <circle cx="15.5" cy="9.5" r="1.5" />
       </>
     ),
     arrow: <path d="M5 12h14m-6-6 6 6-6 6" />,
@@ -356,6 +472,7 @@ export default function Workspace({ user, onLogout, preview = false }) {
   const storageWarning = useRef(null);
   const bodyEditor = useRef(null);
   const pendingCursor = useRef(null);
+  const pendingImages = useRef(null);
   const imagePicker = useRef(null);
   const openPage = useRef(null);
   const [imageDropTarget, setImageDropTarget] = useState(false);
@@ -471,30 +588,58 @@ export default function Workspace({ user, onLogout, preview = false }) {
       ),
     }));
   }
-  // Inserts text at the cursor (replacing any selection), or at the end if the editor is not open.
-  // Reads the live textarea so text typed while an upload was running is kept.
-  // `block` puts the text on its own line, adding line breaks only where needed.
-  function insertIntoBody(text, { block = false } = {}) {
+  // Applies one edit ({ from, to, text, selectStart, selectEnd }) to the page body.
+  // Uses the browser's own insert command so Cmd/Ctrl+Z can undo it; React picks the
+  // change up through the textarea's normal onChange. If the browser refuses (or the
+  // editor is not open), falls back to a plain state update, which cannot be undone.
+  function applyEdit(edit) {
     const editor = bodyEditor.current;
+    if (editor && !editor.disabled) {
+      editor.focus();
+      editor.setSelectionRange(edit.from, edit.to);
+      const command = edit.text ? "insertText" : "delete";
+      if (document.execCommand(command, false, edit.text)) {
+        editor.setSelectionRange(edit.selectStart, edit.selectEnd);
+        return;
+      }
+    }
     const body = editor ? editor.value : draft?.body ?? "";
-    const start = editor ? editor.selectionStart : body.length;
-    const end = editor ? editor.selectionEnd : body.length;
-    const before = body.slice(0, start);
-    const after = body.slice(end);
-    let inserted = text;
-    if (block && before && !before.endsWith("\n")) inserted = `\n${inserted}`;
-    if (block && after && !after.startsWith("\n")) inserted = `${inserted}\n`;
-    updateDocument("body", before + inserted + after);
-    pendingCursor.current = start + inserted.length;
+    updateDocument("body", body.slice(0, edit.from) + edit.text + body.slice(edit.to));
+    pendingCursor.current = [edit.selectStart, edit.selectEnd];
   }
-  // After the inserted text renders, put the cursor just after it. Waits until the
-  // editor is enabled again, because a disabled textarea cannot take focus.
+  function formatSelection(action) {
+    const editor = bodyEditor.current;
+    if (!editor || editor.disabled) return;
+    const edit = formatMarkdown(action, editor.value, editor.selectionStart, editor.selectionEnd);
+    if (edit) applyEdit(edit);
+  }
+  function editorShortcut(event) {
+    if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+    const action = SHORTCUTS[event.key.toLowerCase()];
+    if (!action) return;
+    event.preventDefault();
+    formatSelection(action);
+  }
+  // Restores the selection after a fallback state update, once the textarea has re-rendered.
   useEffect(() => {
     const editor = bodyEditor.current;
-    if (pendingCursor.current === null || !editor || editor.disabled) return;
+    if (!pendingCursor.current || !editor || editor.disabled) return;
     editor.focus();
-    editor.setSelectionRange(pendingCursor.current, pendingCursor.current);
+    editor.setSelectionRange(...pendingCursor.current);
     pendingCursor.current = null;
+  });
+  // Uploaded images are inserted once the upload finishes and the editor is enabled again,
+  // at the selection the member had when the upload started, so the insert can be undone.
+  // The insert runs on the next task, not inside this effect: an edit made during an effect
+  // makes React reset the textarea and write it back, which clears the browser's undo history.
+  useEffect(() => {
+    const pending = pendingImages.current;
+    if (!pending || busy) return;
+    pendingImages.current = null;
+    window.setTimeout(() => {
+      const body = bodyEditor.current ? bodyEditor.current.value : draft?.body ?? "";
+      applyEdit(padBlock(body, pending.start, pending.end, pending.markdown));
+    }, 0);
   });
   // Tracks the page on screen so a slow upload never lands in a page the member has left.
   useEffect(() => { openPage.current = selectedId; }, [selectedId]);
@@ -516,6 +661,9 @@ export default function Workspace({ user, onLogout, preview = false }) {
     const pageId = selected.id;
     const uploaded = [];
     let failureNotice = "";
+    const editor = bodyEditor.current;
+    const bodyLength = (editor ? editor.value : draft?.body ?? "").length;
+    const selection = editor ? [editor.selectionStart, editor.selectionEnd] : [bodyLength, bodyLength];
     setBusy("upload-image");
     setNotice("");
     try {
@@ -531,7 +679,7 @@ export default function Workspace({ user, onLogout, preview = false }) {
         }
       }
       const markdown = uploaded.join("\n");
-      if (markdown && openPage.current === pageId) insertIntoBody(markdown, { block: true });
+      if (markdown && openPage.current === pageId) pendingImages.current = { markdown, start: selection[0], end: selection[1] };
       else if (markdown) {
         const left = `${uploaded.length > 1 ? "The images were" : "The image was"} uploaded, but you left the page first. Paste this where you want it: ${markdown}`;
         failureNotice = failureNotice ? `${left} ${failureNotice}` : left;
@@ -689,7 +837,7 @@ export default function Workspace({ user, onLogout, preview = false }) {
           key={doc.id}
           onClick={() => openDocument(doc.id)}
         >
-          <span className="document-symbol">{doc.icon}</span>
+          <span className="document-symbol">{pageIcon(doc.icon)}</span>
           <span className="eyebrow">{doc.category}</span>
           <h3>{doc.title}</h3>
           <p>{documentExcerpt(doc.body)}</p>
@@ -767,7 +915,7 @@ export default function Workspace({ user, onLogout, preview = false }) {
             className="pinned-page"
             onClick={() => openDocument(d.id)}
           >
-            <span>{d.icon}</span>
+            <span>{pageIcon(d.icon)}</span>
             {d.title}
           </button>
         ))}
@@ -942,7 +1090,7 @@ export default function Workspace({ user, onLogout, preview = false }) {
                 {preview ? <span ref={storageWarning} role="status">Saved in this browser</span> : <span role="status">{busy === "save-document" ? "Saving…" : busy === "upload-image" ? "Uploading image…" : documentDirty ? "Unsaved changes" : "Saved"}</span>}
                 {!preview && <button className="primary-button" onClick={savePage} disabled={!documentDirty || Boolean(busy) || Boolean(conflicts[selected.id])}>Save page</button>}
               </div>
-              <span className="editor-symbol">{selected.icon}</span>
+              <span className="editor-symbol">{pageIcon(selected.icon)}</span>
               <input
                 className="editor-title"
                 aria-label="Document title"
@@ -956,12 +1104,20 @@ export default function Workspace({ user, onLogout, preview = false }) {
                 <div className="editor-modes" role="tablist" aria-label="Document editor mode">
                   {["Write", "Preview"].map((mode) => <button role="tab" key={mode} aria-selected={editorMode === mode} onClick={() => setEditorMode(mode)}>{mode}</button>)}
                 </div>
-                {!preview && editorMode === "Write" && <>
-                  <input ref={imagePicker} type="file" accept={WIKI_IMAGE_ACCEPT} multiple hidden onChange={pickImages} />
-                  <button className="editor-insert-image" onClick={() => imagePicker.current?.click()} disabled={Boolean(busy) || Boolean(conflicts[selected.id])}>
-                    {busy === "upload-image" ? "Uploading…" : "Insert image"}
-                  </button>
-                </>}
+                {editorMode === "Write" && <div className="format-toolbar" role="toolbar" aria-label="Formatting">
+                  {/* onMouseDown keeps focus and the selection in the editor while clicking. */}
+                  {TOOLBAR.map(([action, label, shortcut]) => (
+                    <button key={action} type="button" aria-label={label} title={shortcut ? `${label} (${shortcut})` : label} onMouseDown={(event) => event.preventDefault()} onClick={() => formatSelection(action)} disabled={Boolean(busy)}>
+                      <Icon name={action} size={16} />
+                    </button>
+                  ))}
+                  {!preview && <>
+                    <input ref={imagePicker} type="file" accept={WIKI_IMAGE_ACCEPT} multiple hidden onChange={pickImages} />
+                    <button type="button" aria-label="Insert image" title="Insert image" onMouseDown={(event) => event.preventDefault()} onClick={() => imagePicker.current?.click()} disabled={Boolean(busy) || Boolean(conflicts[selected.id])}>
+                      <Icon name="image" size={16} />
+                    </button>
+                  </>}
+                </div>}
               </div>
               {editorMode === "Write" ? <textarea
                 ref={bodyEditor}
@@ -971,6 +1127,7 @@ export default function Workspace({ user, onLogout, preview = false }) {
                 disabled={Boolean(busy)}
                 onChange={(e) => updateDocument("body", e.target.value)}
                 onPaste={pasteImages}
+                onKeyDown={editorShortcut}
                 onDragOver={dragImagesOver}
                 onDragLeave={() => setImageDropTarget(false)}
                 onDrop={dropImages}

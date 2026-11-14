@@ -66,6 +66,29 @@ describe("Studio workspace preview", () => {
     cy.contains("button", "New task").should("have.focus");
   });
 
+  it("formats text with the toolbar and keyboard shortcuts", () => {
+    const editor = '[aria-label="Document content"]';
+    const tool = (name) => cy.get('[role="toolbar"][aria-label="Formatting"]').find(`[aria-label="${name}"]`);
+    cy.contains("button", "New page").click();
+    cy.get(editor).type("hello world");
+    cy.get(editor).then(($el) => $el[0].setSelectionRange(6, 11));
+    tool("Bold").click();
+    cy.get(editor).should("have.value", "hello **world**");
+    tool("Bold").click();
+    cy.get(editor).should("have.value", "hello world");
+    cy.get(editor).clear().type("first{enter}second{selectall}");
+    tool("Bulleted list").click();
+    cy.get(editor).should("have.value", "- first\n- second");
+    tool("Numbered list").click();
+    cy.get(editor).should("have.value", "1. first\n2. second");
+    cy.get(editor).clear().type("note{selectall}{meta}b");
+    cy.get(editor).should("have.value", "**note**");
+    // The demo has no server, so it offers no image upload.
+    tool("Insert image").should("not.exist");
+    cy.contains('[role="tab"]', "Preview").click();
+    cy.get(".markdown-preview strong").should("have.text", "note");
+  });
+
   it("keeps navigation and content accessible on a narrow screen", () => {
     cy.viewport(390, 844);
     cy.contains("h1", "Home").should("be.visible");

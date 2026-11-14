@@ -154,11 +154,12 @@
 .open-document-tabs button span { color: var(--workspace-magenta); }
 .editor-modes { display: flex; gap: 7px; margin-bottom: 22px; }
 .editor-modes button { padding: 7px 12px; border: 1px solid var(--workspace-line); border-radius: 6px; background: transparent; color: var(--workspace-muted); font-size: 11px; }
-.editor-bar { display: flex; align-items: flex-start; justify-content: space-between; gap: 7px; }
-/* .editor-bar prefix outranks the generic ".workspace button { font: inherit }" rule. */
-.editor-bar .editor-insert-image { padding: 7px 12px; border: 1px solid var(--workspace-line); border-radius: 6px; background: transparent; color: var(--workspace-accent); font-size: 11px; }
-.editor-bar .editor-insert-image:hover:not(:disabled) { background: var(--workspace-hover); }
-.editor-bar .editor-insert-image:disabled { color: var(--workspace-muted); }
+.editor-bar { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 7px; }
+.format-toolbar { display: flex; flex-wrap: wrap; gap: 2px; margin-bottom: 22px; padding: 2px; border: 1px solid var(--workspace-line); border-radius: 7px; }
+.format-toolbar button { display: grid; place-items: center; width: 29px; height: 27px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--workspace-muted); }
+.format-toolbar button:hover:not(:disabled) { background: var(--workspace-hover); color: var(--workspace-accent); }
+/* The image button starts its own group. */
+.format-toolbar input[type="file"] + button { margin-left: 5px; border-left: 1px solid var(--workspace-line); border-radius: 0 5px 5px 0; }
 .editor-modes button[aria-selected="true"] { background: var(--workspace-purple-soft); color: var(--workspace-accent); border-color: var(--workspace-accent-border); }
 .editor-toolbar .primary-button { background: var(--workspace-purple); color: white; }
 .editor-footnote { display: flex; flex-wrap: wrap; align-items: center; gap: 15px; justify-content: flex-end; }
@@ -433,6 +434,9 @@ button.document-card:hover { border-color: #3c4565; box-shadow: 0 7px 16px #6546
 }
 
 @media (max-width: 430px) {
+  /* Toolbar spans the editor so all buttons fit on one row. */
+  .format-toolbar { width: 100%; flex-wrap: nowrap; justify-content: space-between; }
+  .format-toolbar button { width: auto; flex: 1 1 0; min-width: 0; }
   .page-heading h1 { font-size: 24px; }
   .page-heading > button { max-width: 104px; font-size: 9px !important; }
   .page-heading > button svg { width: 12px; height: 12px; }
