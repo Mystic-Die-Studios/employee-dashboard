@@ -123,6 +123,30 @@ function imageMarkdown(fileName, url) {
   return `![${alt}](${url})`;
 }
 
+// Card preview: the first two lines of a page as plain text. Images are dropped, links keep
+// their text, and Markdown symbols (headings, lists, checkboxes, quotes, emphasis, code) go.
+function documentExcerpt(body) {
+  return (body || "")
+    .replace(/```[\s\S]*?(```|$)/g, "\n")
+    .split("\n")
+    .map((line) => line
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+      .replace(/^\s*(#{1,6}\s+|>\s?|[-*+]\s+\[[ xX]\]\s+|[-*+]\s+|\d+[.)]\s+)/, "")
+      .replace(/^\s*([-*_]\s*){3,}$/, "")
+      .replace(/^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/, "")
+      .replace(/(\*\*|__|~~|`)/g, "")
+      .replace(/(^|[^\w*])\*(?!\s)([^*]+?)\*(?=[^\w*]|$)/g, "$1$2")
+      .replace(/(^|\W)_(?!\s)([^_]+?)_(?=\W|$)/g, "$1$2")
+      .replace(/\|/g, " ")
+      .replace(/\s+/g, " ")
+      .trim())
+    .filter(Boolean)
+    .slice(0, 2)
+    .join(" · ")
+    .slice(0, 100);
+}
+
 // Guards against dropping a whole folder of files by accident.
 const MAX_IMAGES_AT_ONCE = 10;
 
@@ -668,14 +692,7 @@ export default function Workspace({ user, onLogout, preview = false }) {
           <span className="document-symbol">{doc.icon}</span>
           <span className="eyebrow">{doc.category}</span>
           <h3>{doc.title}</h3>
-          <p>
-            {doc.body
-              .split("\n")
-              .filter(Boolean)
-              .slice(0, 2)
-              .join(" · ")
-              .slice(0, 100)}
-          </p>
+          <p>{documentExcerpt(doc.body)}</p>
           <span className="document-footer">
             Edited {doc.updated.toLowerCase()} <Icon name="arrow" size={16} />
           </span>
