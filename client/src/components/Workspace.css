@@ -216,6 +216,8 @@
 .markdown-preview :is(th, td) { padding: 8px 13px; border: 1px solid var(--workspace-line); text-align: left; }
 .markdown-preview th { background: var(--workspace-purple-soft); }
 .markdown-preview hr { margin: 23px 0; border: 0; border-top: 1px solid var(--workspace-line); }
+/* Never wider than the page; very tall images are capped and keep their proportions. */
+.markdown-preview .wiki-image { display: block; max-width: 100%; max-height: 640px; width: auto; height: auto; margin: 14px 0; border: 1px solid var(--workspace-line); border-radius: 8px; background: var(--workspace-raised); }
 .markdown-image { display: inline-block; padding: 7px 10px; border: 1px dashed var(--workspace-accent-border); border-radius: 6px; color: var(--workspace-muted); font-size: 11px; }
 .form-hint { color: var(--workspace-muted); font-size: 10px; line-height: 1.8; }
 .form-error { margin-top: 16px !important; padding: 12px; border: 1px solid #74494f; border-radius: 7px; background: var(--workspace-coral-soft); color: var(--workspace-coral); font-size: 12px; line-height: 1.7; }
