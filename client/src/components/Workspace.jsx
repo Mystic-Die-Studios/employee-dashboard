@@ -123,6 +123,27 @@ function imageMarkdown(fileName, url) {
   return `![${alt}](${url})`;
 }
 
+// Guards against dropping a whole folder of files by accident.
+const MAX_IMAGES_AT_ONCE = 10;
+
+const PASTED_IMAGE_EXTENSIONS = { "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif" };
+
+// Browsers name pasted screenshots "image.png" (or leave them unnamed), which would make
+// the alt text "image" or fail the extension check. Name them from their image type.
+function renamePastedImage(file) {
+  const generic = !file.name || /^image(\.[a-z0-9]+)?$/i.test(file.name);
+  const extension = PASTED_IMAGE_EXTENSIONS[file.type];
+  return generic && extension ? new File([file], `Pasted image${extension}`, { type: file.type, lastModified: file.lastModified }) : file;
+}
+
+// Quick browser-side check; the server re-checks every upload.
+function imageFileProblem(file) {
+  const extension = file.name.includes(".") ? `.${file.name.split(".").pop().toLowerCase()}` : "";
+  if (!WIKI_IMAGE_ACCEPT.split(",").includes(extension)) return "Upload an image: PNG, JPEG, WebP, or GIF.";
+  if (file.size > WIKI_IMAGE_MAX_BYTES) return `The image exceeds the ${WIKI_IMAGE_MAX_BYTES / (1024 * 1024)} MB limit.`;
+  return "";
+}
+
 function Icon({ name, size = 20 }) {
   const paths = {
     home: (
@@ -313,6 +334,7 @@ export default function Workspace({ user, onLogout, preview = false }) {
   const pendingCursor = useRef(null);
   const imagePicker = useRef(null);
   const openPage = useRef(null);
+  const [imageDropTarget, setImageDropTarget] = useState(false);
   const [query, setQuery] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [taskForm, setTaskForm] = useState(false);
@@ -455,35 +477,99 @@ export default function Workspace({ user, onLogout, preview = false }) {
   });
   // Tracks the page on screen so a slow upload never lands in a page the member has left.
   useEffect(() => { openPage.current = selectedId; }, [selectedId]);
-  async function insertImage(event) {
-    const file = event.target.files?.[0];
-    event.target.value = ""; // Allow picking the same file again later.
-    if (!file || !selected || busy) return;
-    const extension = file.name.includes(".") ? `.${file.name.split(".").pop().toLowerCase()}` : "";
-    if (!WIKI_IMAGE_ACCEPT.split(",").includes(extension)) {
-      setNotice("Upload an image: PNG, JPEG, WebP, or GIF.");
+  // Shared by the file picker, paste, and drag-and-drop. Uploads one at a time and
+  // inserts all the Markdown in one go at the cursor, each image on its own line.
+  async function uploadImages(fileList) {
+    const files = Array.from(fileList ?? []);
+    if (!files.length || !selected || busy) return;
+    const named = (file, message) => files.length > 1 ? `${file.name}: ${message}` : message;
+    if (files.length > MAX_IMAGES_AT_ONCE) {
+      setNotice(`Add up to ${MAX_IMAGES_AT_ONCE} images at a time.`);
       return;
     }
-    if (file.size > WIKI_IMAGE_MAX_BYTES) {
-      setNotice(`The image exceeds the ${WIKI_IMAGE_MAX_BYTES / (1024 * 1024)} MB limit.`);
-      return;
+    // Check every file first, so nothing uploads when one of them is unsupported.
+    for (const file of files) {
+      const problem = imageFileProblem(file);
+      if (problem) { setNotice(named(file, problem)); return; }
     }
     const pageId = selected.id;
+    const uploaded = [];
+    let failureNotice = "";
     setBusy("upload-image");
     setNotice("");
     try {
-      const image = await uploadDocumentImage(file, pageId);
-      const markdown = imageMarkdown(image.file_name, image.url);
-      if (openPage.current === pageId) insertIntoBody(markdown, { block: true });
-      else setNotice(`The image was uploaded, but you left the page first. Paste this where you want it: ${markdown}`);
-    } catch (failure) {
-      // Show the server's file message without the "file: " field prefix.
-      const fileError = failure.response?.data?.file?.[0];
-      setNotice(typeof fileError === "string" ? fileError : workspaceError(failure, "The image could not be uploaded. Try again."));
+      for (const file of files) {
+        try {
+          const image = await uploadDocumentImage(file, pageId);
+          uploaded.push(imageMarkdown(image.file_name, image.url));
+        } catch (failure) {
+          // Show the server's file message without the "file: " field prefix.
+          const fileError = failure.response?.data?.file?.[0];
+          failureNotice = named(file, typeof fileError === "string" ? fileError : workspaceError(failure, "The image could not be uploaded. Try again."));
+          break; // Keep the images that already uploaded; skip the rest.
+        }
+      }
+      const markdown = uploaded.join("\n");
+      if (markdown && openPage.current === pageId) insertIntoBody(markdown, { block: true });
+      else if (markdown) {
+        const left = `${uploaded.length > 1 ? "The images were" : "The image was"} uploaded, but you left the page first. Paste this where you want it: ${markdown}`;
+        failureNotice = failureNotice ? `${left} ${failureNotice}` : left;
+      }
+      setNotice(failureNotice);
     } finally {
       setBusy("");
     }
   }
+  function pickImages(event) {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = ""; // Allow picking the same file again later.
+    uploadImages(files);
+  }
+  function pasteImages(event) {
+    if (preview || conflicts[selected?.id]) return;
+    const clipboard = event.clipboardData;
+    // Copies from spreadsheets and Word carry the text plus a picture of it: keep the
+    // normal text paste. Screenshots and "Copy image" carry no plain text.
+    if (!clipboard || clipboard.types.includes("text/plain")) return;
+    const images = Array.from(clipboard.files).filter((file) => file.type.startsWith("image/"));
+    if (!images.length) return;
+    event.preventDefault();
+    uploadImages(images.map(renamePastedImage));
+  }
+  // Drag and drop: same rules as the button. Text dragged within the editor has no
+  // "Files" type, so it keeps the browser's normal behavior.
+  const canDropImages = Boolean(selected) && !preview && editorMode === "Write" && !busy && !conflicts[selected?.id];
+  const draggingFiles = (event) => Array.from(event.dataTransfer?.types ?? []).includes("Files");
+  function dragImagesOver(event) {
+    if (!draggingFiles(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = canDropImages ? "copy" : "none";
+    if (canDropImages !== imageDropTarget) setImageDropTarget(canDropImages);
+  }
+  function dropImages(event) {
+    if (!draggingFiles(event)) return;
+    event.preventDefault();
+    setImageDropTarget(false);
+    // Browsers do not report where in a textarea a file was dropped, so images go
+    // where the cursor was before dragging.
+    if (canDropImages) uploadImages(event.dataTransfer.files);
+  }
+  // While a page is open, a file dropped anywhere outside the editor would make the
+  // browser open that file and leave the page, losing unsaved edits. Refuse those drops.
+  useEffect(() => {
+    if (!selectedId) return;
+    const refuseFileDrop = (event) => {
+      if (event.defaultPrevented || !Array.from(event.dataTransfer?.types ?? []).includes("Files")) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "none";
+    };
+    window.addEventListener("dragover", refuseFileDrop);
+    window.addEventListener("drop", refuseFileDrop);
+    return () => {
+      window.removeEventListener("dragover", refuseFileDrop);
+      window.removeEventListener("drop", refuseFileDrop);
+    };
+  }, [selectedId]);
   async function changeStatus(id, status) {
     if (busy) return;
     setBusy(`task:${id}`);
@@ -945,7 +1031,7 @@ export default function Workspace({ user, onLogout, preview = false }) {
                   {["Write", "Preview"].map((mode) => <button role="tab" key={mode} aria-selected={editorMode === mode} onClick={() => setEditorMode(mode)}>{mode}</button>)}
                 </div>
                 {!preview && editorMode === "Write" && <>
-                  <input ref={imagePicker} type="file" accept={WIKI_IMAGE_ACCEPT} hidden onChange={insertImage} />
+                  <input ref={imagePicker} type="file" accept={WIKI_IMAGE_ACCEPT} multiple hidden onChange={pickImages} />
                   <button className="editor-insert-image" onClick={() => imagePicker.current?.click()} disabled={Boolean(busy) || Boolean(conflicts[selected.id])}>
                     {busy === "upload-image" ? "Uploading…" : "Insert image"}
                   </button>
@@ -958,6 +1044,11 @@ export default function Workspace({ user, onLogout, preview = false }) {
                 value={draft.body}
                 disabled={Boolean(busy)}
                 onChange={(e) => updateDocument("body", e.target.value)}
+                onPaste={pasteImages}
+                onDragOver={dragImagesOver}
+                onDragLeave={() => setImageDropTarget(false)}
+                onDrop={dropImages}
+                className={imageDropTarget ? "image-drop-target" : undefined}
               /> : <MarkdownPreview>{draft.body || "*This page is empty. Switch to Write to add content.*"}</MarkdownPreview>}
               {conflicts[selected.id] && <div className="document-conflict" role="alert">
                 <h3>This page changed while you were writing.</h3>

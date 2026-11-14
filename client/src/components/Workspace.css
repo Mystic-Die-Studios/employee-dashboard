@@ -361,6 +361,8 @@ button.document-card:hover { border-color: #3c4565; box-shadow: 0 7px 16px #6546
 .editor-category select { padding: 3px 7px; border: 1px solid var(--workspace-line); border-radius: 5px; background: var(--workspace-hover); color: var(--workspace-accent); font-size: 10px; }
 .document-editor textarea { display: block; width: 100%; min-height: 340px; padding: 0; resize: vertical; border: 0; background: transparent; color: var(--workspace-ink); font-size: 13px; line-height: 2; }
 .document-editor textarea::placeholder { color: var(--workspace-muted); }
+/* Shown while an image file is dragged over the editor. */
+.document-editor textarea.image-drop-target { outline: 2px dashed var(--workspace-accent); outline-offset: 6px; border-radius: 6px; background: var(--workspace-purple-soft); }
 .document-editor [contenteditable] { min-height: 340px; color: var(--workspace-ink); font-size: 13px; line-height: 2; }
 .editor-footnote { padding-top: 20px; margin-top: 20px !important; border-top: 1px solid var(--workspace-line); color: var(--workspace-muted); font-size: 9px; }
 .board-project-title { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; color: var(--workspace-ink); font-size: 13px; font-weight: 550; }
