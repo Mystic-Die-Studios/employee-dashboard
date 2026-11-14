@@ -1,4 +1,5 @@
 import tempfile
+import uuid
 from unittest.mock import Mock, patch
 
 import requests
@@ -241,6 +242,65 @@ class WorkspaceTests(TestCase):
         self.client.cookies.clear()
         self.assertEqual(self.upload_wiki_image().status_code, 401)
         self.assertFalse(DocumentImage.objects.exists())
+
+    def wiki_image_url(self, file=None):
+        response = self.upload_wiki_image(file)
+        self.assertEqual(response.status_code, 201, response.data)
+        return response.data['url']
+
+    def fetch(self, url):
+        response = self.client.get(url)
+        body = b''.join(response.streaming_content) if response.streaming else response.content
+        response.close()
+        return response, body
+
+    def test_wiki_image_is_served_inline_with_safety_and_cache_headers(self):
+        url = self.wiki_image_url()
+        self.assertEqual(url, reverse('workspace_document_image', kwargs={'pk': DocumentImage.objects.get().id}))
+        response, body = self.fetch(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(body, b'\x89PNG\r\n\x1a\nconcept-art')
+        self.assertEqual(response['Content-Type'], 'image/png')
+        self.assertTrue(response['Content-Disposition'].startswith('inline;'))
+        self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
+        self.assertEqual(response['Content-Security-Policy'], "default-src 'none'; sandbox")
+        self.assertEqual(response['Cross-Origin-Resource-Policy'], 'same-site')
+        self.assertEqual(response['Cache-Control'], 'private, max-age=86400')
+
+    def test_wiki_image_content_type_comes_from_stored_extension(self):
+        for filename, content, content_type in [('a.jpg', b'\xff\xd8\xff\xe0', 'image/jpeg'), ('b.jpeg', b'\xff\xd8\xff\xe1', 'image/jpeg'), ('c.gif', b'GIF89a', 'image/gif'), ('d.webp', b'RIFF\x00\x00\x00\x00WEBPVP8 ', 'image/webp')]:
+            with self.subTest(filename=filename):
+                response, body = self.fetch(self.wiki_image_url(art_file(filename, content)))
+                self.assertEqual(response['Content-Type'], content_type)
+                self.assertEqual(body, content)
+
+    def test_any_signed_in_member_can_view_another_members_wiki_image(self):
+        url = self.wiki_image_url()
+        self.login(self.teammate)
+        self.assertEqual(self.fetch(url)[0].status_code, 200)
+
+    def test_wiki_image_requires_authentication_and_errors_are_never_cached(self):
+        url = self.wiki_image_url()
+        self.client.cookies.clear()
+        response, body = self.fetch(url)
+        self.assertEqual(response.status_code, 401)
+        self.assertNotIn(b'concept-art', body)
+        self.assertEqual(response['Cache-Control'], 'private, no-store')
+        self.login(self.artist)
+        unknown, _ = self.fetch(reverse('workspace_document_image', kwargs={'pk': uuid.uuid4()}))
+        self.assertEqual(unknown.status_code, 404)
+        self.assertEqual(unknown['Cache-Control'], 'private, no-store')
+
+    def test_wiki_image_with_missing_file_or_unexpected_stored_type_is_not_found(self):
+        url = self.wiki_image_url()
+        image = DocumentImage.objects.get()
+        image.file.storage.delete(image.file.name)
+        self.assertEqual(self.fetch(url)[0].status_code, 404)
+        # Defense in depth: a row that somehow points at a non-image is never served.
+        image.file.save('legacy.svg', SimpleUploadedFile('legacy.svg', b'<svg onload=alert(1)>'), save=True)
+        response, body = self.fetch(url)
+        self.assertEqual(response.status_code, 404)
+        self.assertNotIn(b'<svg', body)
 
     def test_feedback_is_stored_and_only_admin_can_make_decisions(self):
         review = self.review()

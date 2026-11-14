@@ -7,6 +7,7 @@ urlpatterns = [
     path('', views.WorkspaceView.as_view(), name='workspace'),
     path('documents/', views.DocumentsView.as_view(), name='workspace_documents'),
     path('documents/images/', views.DocumentImagesView.as_view(), name='workspace_document_images'),
+    path('documents/images/<uuid:pk>/', views.DocumentImageView.as_view(), name='workspace_document_image'),
     path('documents/<uuid:pk>/',views.DocumentView.as_view(), name='workspace_document'),
     path('tasks/', views.TasksView.as_view(), name='workspace_tasks'),
     path('tasks/<uuid:pk>/', views.TaskView.as_view(), name='workspace_task'),
