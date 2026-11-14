@@ -292,7 +292,7 @@ describe("Authenticated studio platform", () => {
     cy.wait("@reviewLoaded");
     cy.get('[aria-label="Review ticket"]').should("contain", "ART-300000000000");
     cy.contains("button", "Download artifact").should("be.visible");
-    cy.contains("GitHub connection not configured. Your studio review is saved.").should("be.visible");
+    cy.contains("Not linked to GitHub.").should("be.visible");
     cy.get('[aria-label="Review decision"]').should("not.exist");
     cy.get('[aria-label="Review feedback"]').type("The silhouette reads clearly; keep this direction.");
     cy.contains("button", "Save feedback").click();
@@ -455,12 +455,12 @@ describe("Authenticated studio platform", () => {
     openDashboard();
     openReview();
     cy.contains("a", "View GitHub issue").should("have.attr", "href", issueUrl);
-    cy.contains("GitHub issue sync failed. Your studio review is saved.").should("be.visible");
+    cy.contains("GitHub sync failed. Your review is saved.").should("be.visible");
     cy.contains("button", "Retry GitHub sync").click();
     cy.wait("@retryGithub");
     cy.contains("a", "View GitHub issue").should("have.attr", "href", issueUrl);
     cy.contains("button", "Retry GitHub sync").should("not.exist");
-    cy.contains("GitHub issue sync failed").should("not.exist");
+    cy.contains("GitHub sync failed").should("not.exist");
   });
 
   it("keeps the authenticated workspace open when logout fails", () => {

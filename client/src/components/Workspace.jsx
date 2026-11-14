@@ -23,7 +23,7 @@ const initialDocuments = [
     category: "Getting started",
     icon: "✦",
     updated: "Just now",
-    body: "# Studio Workspace\n\n## Navigation\n- Projects: view tasks by status.\n- Documents: create and edit Markdown pages.\n- My tasks: view tasks assigned to you.\n- Reviews: upload artwork and read feedback.\n- Team: view workspace members.",
+    body: "# Welcome\n\n- Projects: tasks by status\n- Documents: the team wiki\n- My tasks: tasks assigned to you\n- Reviews: art feedback\n- Team: who is here",
   },
   {
     id: "direction",
@@ -31,7 +31,7 @@ const initialDocuments = [
     category: "Project Reconnection",
     icon: "◈",
     updated: "Today",
-    body: "# Project Reconnection\n\nUse this document to collect visual references, narrative ideas, and creative decisions for the project.",
+    body: "# Project Reconnection\n\nVisual references, story ideas, and creative decisions.",
   },
   {
     id: "onboarding",
@@ -39,7 +39,7 @@ const initialDocuments = [
     category: "Studio wiki",
     icon: "☀",
     updated: "Yesterday",
-    body: "WELCOME TO THE TEAM\n\nYour first week\n• Meet your teammates.\n• Get access to the project repository.\n• Read the creative direction.\n• Pick a small first task with your lead.\n\nQuestions are welcome. Leave a note here and bring it to our next team check-in.",
+    body: "# Your first week\n\n- Meet your teammates.\n- Get access to the project repository.\n- Read the creative direction.\n- Pick a small first task with your lead.",
   },
   {
     id: "notes",
@@ -47,7 +47,7 @@ const initialDocuments = [
     category: "Studio wiki",
     icon: "≋",
     updated: "Yesterday",
-    body: "STUDIO CHECK-IN\n\nWhat moved forward?\n\nWhat did we learn?\n\nWhere do we need a hand?\n\nNext steps\nCapture decisions and turn follow-ups into tasks on the project board.",
+    body: "# Weekly check-in\n\n## What moved forward?\n\n## What did we learn?\n\n## Where do we need a hand?\n\n## Next steps",
   },
 ];
 const initialTasks = [
@@ -354,9 +354,6 @@ export default function Workspace({ user, onLogout, preview = false }) {
     `${t.title} ${t.project}`.toLowerCase().includes(query.toLowerCase()),
   );
   const complete = data.tasks.filter((t) => t.status === "Done").length;
-  const progress = data.tasks.length
-    ? Math.round((complete / data.tasks.length) * 100)
-    : 0;
   const projectCount = new Set([...data.tasks.map((task) => task.project), ...data.reviews.map((review) => review.project)].filter(Boolean)).size;
 
   useEffect(() => {
@@ -605,11 +602,10 @@ export default function Workspace({ user, onLogout, preview = false }) {
       const saved = await saveDocument(selected.id, { title: draft.title.trim(), body: draft.body, version: draft.version });
       setData((current) => ({ ...current, documents: current.documents.map((doc) => doc.id === saved.id ? saved : doc) }));
       setDrafts((current) => { const next = { ...current }; delete next[saved.id]; return next; });
-      setNotice("Page saved to the studio workspace.");
     } catch (failure) {
       if (failure.response?.status === 409) {
         setConflicts((current) => ({ ...current, [selected.id]: { latest: null } }));
-        setNotice("Another member changed this page. Your draft is safe. Compare with the saved page before saving again.");
+        setNotice("Another member changed this page. Your draft is safe; compare before saving.");
       } else setNotice(workspaceError(failure, "Your page could not be saved. Your draft is still here; try again."));
     } finally { setBusy(""); }
   }
@@ -629,11 +625,11 @@ export default function Workspace({ user, onLogout, preview = false }) {
     setData((current) => ({ ...current, documents: current.documents.map((doc) => doc.id === latest.id ? latest : doc) }));
     setDrafts((current) => ({ ...current, [selected.id]: { ...current[selected.id], version: latest.version } }));
     setConflicts((current) => { const next = { ...current }; delete next[selected.id]; return next; });
-    setNotice("Review and merge your draft, then Save page to replace the latest saved content.");
+    setNotice("Merge your changes, then save to replace the latest version.");
   }
   async function removePage() {
     if (!selected || busy) return;
-    if (!window.confirm(`Delete “${selected.title}”? This removes the shared page and its contents from the studio workspace.`)) return;
+    if (!window.confirm(`Delete “${selected.title}”? This can't be undone.`)) return;
     setBusy("delete-document");
     try {
       await deleteDocument(selected.id);
@@ -712,12 +708,6 @@ export default function Workspace({ user, onLogout, preview = false }) {
             MYSTIC DIE<small>STUDIOS</small>
           </span>
         </a>
-        <div className="workspace-switch">
-          <span className="workspace-avatar">M</span>
-          <span>
-            Mystic Die Studios<small>Studio Workspace</small>
-          </span>
-        </div>
         <p className="nav-label">WORKSPACE</p>
         <nav aria-label="Workspace navigation">
           {[
@@ -764,14 +754,6 @@ export default function Workspace({ user, onLogout, preview = false }) {
             {d.title}
           </button>
         ))}
-        <div className="sidebar-note">
-          <span>✧</span>
-          <h4>Markdown pages</h4>
-          <p>Create a page for notes or documentation.</p>
-          <button onClick={newDocument} disabled={Boolean(busy) || loading || Boolean(loadError)}>
-            Create page <Icon name="arrow" size={16} />
-          </button>
-        </div>
         <div className="account">
           <span className="person-avatar">
             {name.slice(0, 2).toUpperCase()}
@@ -811,10 +793,6 @@ export default function Workspace({ user, onLogout, preview = false }) {
             <span>/</span>
             <strong>{selected ? selected.title : view}</strong>
           </div>
-          <span className="studio-status">
-            <span />
-            Studio Workspace
-          </span>
         </header>
         {preview && <div className="preview-banner">
           <span className="preview-dot" />
@@ -835,29 +813,9 @@ export default function Workspace({ user, onLogout, preview = false }) {
         </div>}
         <main className="workspace-content" data-testid="dashboard-header">
           <div className="page-heading">
-            <div>
-              <p className="eyebrow">
-                MYSTIC DIE STUDIOS / {view.toUpperCase()}
-              </p>
-              <h1>
-                {selected ? "Edit document" : view}
-              </h1>
-              <p className="page-subtitle">
-                {selected
-                  ? "Edit the title and Markdown content. Use Preview to check formatting."
-                  : view === "Home"
-                  ? "View project and task counts, and open documents."
-                  : view === "Projects"
-                    ? "View project tasks by status and create new tasks."
-                    : view === "Documents"
-                      ? "Create, search, and edit Markdown pages."
-                      : view === "My tasks"
-                        ? "View and update tasks assigned to you."
-                        : view === "Reviews"
-                          ? "Upload artwork, collect feedback, and track every review in one place."
-                        : "View workspace members and their roles."}
-              </p>
-            </div>
+            <h1>
+              {selected ? "Edit document" : view}
+            </h1>
             {view !== "Team" && <button
               className="primary-button"
               disabled={Boolean(busy)}
@@ -884,41 +842,12 @@ export default function Workspace({ user, onLogout, preview = false }) {
           )}
           {view === "Home" && (
             <>
-              <section className="welcome-card">
-                <div className="welcome-copy">
-                  <h2>Studio Workspace</h2>
-                  <p>
-                    Manage project tasks, edit documentation, and review artwork.
-                  </p>
-                  <button onClick={() => go("Projects")}>
-                    Open project board <Icon name="arrow" size={18} />
-                  </button>
-                </div>
-                <div className="hero-art" aria-hidden="true">
-                  <div className="die-orbit die-orbit-one" />
-                  <div className="die-orbit die-orbit-two" />
-                  <div className="die-glow" />
-                  <img className="hero-die" src="/studio-die.svg" alt="" />
-                  <span className="die-spark die-spark-one">✦</span>
-                  <span className="die-spark die-spark-two">✧</span>
-                </div>
-              </section>
               <div className="stats-row">
                 {[
-                  ["project", "Active projects", projectCount, "View project board"],
-                  [
-                    "document",
-                    "Shared documents",
-                    data.documents.length,
-                    "Open documents",
-                  ],
-                  [
-                    "task",
-                    "Open tasks",
-                    data.tasks.length - complete,
-                    "View your tasks",
-                  ],
-                ].map(([icon, label, count, description]) => (
+                  ["project", "Active projects", projectCount],
+                  ["document", "Shared documents", data.documents.length],
+                  ["task", "Open tasks", data.tasks.length - complete],
+                ].map(([icon, label, count]) => (
                   <button
                     className="stat-card"
                     key={label}
@@ -938,7 +867,6 @@ export default function Workspace({ user, onLogout, preview = false }) {
                     <div>
                       <span>{label}</span>
                       <strong>{count}</strong>
-                      <small>{description}</small>
                     </div>
                     <Icon name="arrow" size={17} />
                   </button>
@@ -951,23 +879,6 @@ export default function Workspace({ user, onLogout, preview = false }) {
                 </button>
               </div>
               {documentList}
-              <section className="project-summary">
-                <span className="project-emblem">◈</span>
-                <div>
-                  <h3>Studio workflow</h3>
-                  <p>Documents, tasks, and art reviews in one shared workspace.</p>
-                </div>
-                <div className="project-progress">
-                  <span>{progress}% of {preview ? "sample " : ""}tasks complete</span>
-                  <progress value={complete} max={data.tasks.length || 1} />
-                </div>
-                <button
-                  className="secondary-button"
-                  onClick={() => go("Projects")}
-                >
-                  Open project <Icon name="arrow" size={16} />
-                </button>
-              </section>
             </>
           )}
 
@@ -1011,7 +922,7 @@ export default function Workspace({ user, onLogout, preview = false }) {
                 <button onClick={() => go("Documents")}>
                   ← All documents
                 </button>
-                {preview ? <span ref={storageWarning} role="status">Saved in this browser</span> : <span role="status">{busy === "save-document" ? "Saving page…" : busy === "upload-image" ? "Uploading image…" : documentDirty ? "Unsaved changes" : "Saved to studio workspace"}</span>}
+                {preview ? <span ref={storageWarning} role="status">Saved in this browser</span> : <span role="status">{busy === "save-document" ? "Saving…" : busy === "upload-image" ? "Uploading image…" : documentDirty ? "Unsaved changes" : "Saved"}</span>}
                 {!preview && <button className="primary-button" onClick={savePage} disabled={!documentDirty || Boolean(busy) || Boolean(conflicts[selected.id])}>Save page</button>}
               </div>
               <span className="editor-symbol">{selected.icon}</span>
@@ -1023,9 +934,7 @@ export default function Workspace({ user, onLogout, preview = false }) {
                 disabled={Boolean(busy)}
                 onChange={(e) => updateDocument("title", e.target.value)}
               />
-              <span className="editor-category">
-                {selected.category} <span>•</span> Studio document
-              </span>
+              <span className="editor-category">{selected.category}</span>
               <div className="editor-bar">
                 <div className="editor-modes" role="tablist" aria-label="Document editor mode">
                   {["Write", "Preview"].map((mode) => <button role="tab" key={mode} aria-selected={editorMode === mode} onClick={() => setEditorMode(mode)}>{mode}</button>)}
@@ -1040,7 +949,7 @@ export default function Workspace({ user, onLogout, preview = false }) {
               {editorMode === "Write" ? <textarea
                 ref={bodyEditor}
                 aria-label="Document content"
-                placeholder="Write Markdown: headings, lists, links, tables, and checklists."
+                placeholder="Write in Markdown…"
                 value={draft.body}
                 disabled={Boolean(busy)}
                 onChange={(e) => updateDocument("body", e.target.value)}
@@ -1049,36 +958,27 @@ export default function Workspace({ user, onLogout, preview = false }) {
                 onDragLeave={() => setImageDropTarget(false)}
                 onDrop={dropImages}
                 className={imageDropTarget ? "image-drop-target" : undefined}
-              /> : <MarkdownPreview>{draft.body || "*This page is empty. Switch to Write to add content.*"}</MarkdownPreview>}
+              /> : <MarkdownPreview>{draft.body || "*This page is empty.*"}</MarkdownPreview>}
               {conflicts[selected.id] && <div className="document-conflict" role="alert">
                 <h3>This page changed while you were writing.</h3>
-                <p>Your draft is still above. Compare the latest saved page and merge any changes before saving.</p>
+                <p>Your draft is kept above. Compare and merge before saving.</p>
                 <button className="secondary-button" onClick={comparePage} disabled={Boolean(busy)}>Compare with saved page</button>
                 {conflicts[selected.id].latest && <>
                   <h4>Latest saved version: {conflicts[selected.id].latest.title}</h4>
                   <MarkdownPreview>{conflicts[selected.id].latest.body}</MarkdownPreview>
-                  <p>Using this version keeps your draft. Your next save will replace the latest page with your merged draft.</p>
+                  <p>Your draft stays as it is. Your next save replaces this version.</p>
                   <button className="secondary-button" onClick={useLatestVersion}>Use latest version for this draft</button>
                 </>}
               </div>}
-              <div className="editor-footnote">
-                Markdown wiki · {preview ? "Changes stay in this demo browser." : "Save page to share changes with your studio. Drafts remain in open tabs until saved."}
-                {!preview && selected.can_delete && <button className="secondary-button" onClick={removePage} disabled={Boolean(busy)}>Delete page</button>}
-              </div>
+              {!preview && selected.can_delete && <div className="editor-footnote">
+                <button className="secondary-button" onClick={removePage} disabled={Boolean(busy)}>Delete page</button>
+              </div>}
             </section>
           )}
           {view === "Documents" && selectedId && !selected && <p className="empty-state">This page is unavailable or has been deleted.<button className="secondary-button" onClick={() => go("Documents")}>All documents</button></p>}
           {view === "Reviews" && <Reviews reviews={data.reviews} selectedId={reviewId} onSelect={(id) => navigate("Reviews", null, id)} onUpdate={upsertReview} preview={preview} query={query} showForm={reviewForm} onCloseForm={() => setReviewForm(false)} />}
           {view === "Projects" && (
             <>
-              <div className="board-project-title">
-                <span className="project-emblem">◈</span>
-                <div>
-                  <h2>Studio project board</h2>
-                  <p>Shared tasks across studio projects</p>
-                </div>
-                <span className="pill">ACTIVE</span>
-              </div>
               <div className="kanban-board">
                 {statuses.map((status) => (
                   <section className="kanban-column" key={status}>
