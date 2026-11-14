@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework import serializers
 
-from .models import ArtReview, Document, ReviewFeedback, Task
+from .models import ArtReview, Document, DocumentImage, ReviewFeedback, Task
 
 
 def is_reviewer(user):
@@ -111,6 +111,31 @@ def validate_art_file(upload):
     # Neutralize names from either desktop path convention; private storage uses a UUID.
     upload.name = filename
     return upload
+
+
+# Formats browsers render inline as <img>. SVG is excluded on purpose: it can carry scripts.
+WIKI_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp', 'gif'}
+
+
+def validate_wiki_image(upload):
+    filename = PurePosixPath(upload.name.replace('\\', '/')).name
+    parts = filename.lower().split('.')
+    extension = parts[-1] if len(parts) > 1 else ''
+    if extension not in WIKI_IMAGE_EXTENSIONS or any(part in UNSAFE_NAME_PARTS for part in parts[1:]):
+        raise serializers.ValidationError('Upload an image: PNG, JPEG, WebP, or GIF.')
+    if upload.size > settings.WIKI_IMAGE_MAX_BYTES:
+        raise serializers.ValidationError(f'The image exceeds the {settings.WIKI_IMAGE_MAX_BYTES // (1024 * 1024)} MB limit.')
+    # Shared checks: filename, unsafe double extensions, empty/oversize file, content matches extension.
+    return validate_art_file(upload)
+
+
+class DocumentImageUploadSerializer(serializers.ModelSerializer):
+    file = serializers.FileField(validators=[validate_wiki_image])
+    document = serializers.PrimaryKeyRelatedField(queryset=Document.objects.all(), required=False, allow_null=True)
+
+    class Meta:
+        model = DocumentImage
+        fields = ['file', 'document']
 
 
 class ReviewUploadSerializer(serializers.ModelSerializer):

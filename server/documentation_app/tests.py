@@ -10,7 +10,7 @@ from rest_framework.test import APIClient
 
 from user_app.auth_utils import create_access_token
 from .github_service import sync_review
-from .models import ArtReview, Document, ReviewFeedback, Task
+from .models import ArtReview, Document, DocumentImage, ReviewFeedback, Task
 
 
 def art_file(name='concept.png', content=None):
@@ -186,6 +186,61 @@ class WorkspaceTests(TestCase):
     def test_oversize_upload_is_rejected_before_storage(self):
         self.assertEqual(self.upload().status_code, 400)
         self.assertFalse(ArtReview.objects.exists())
+
+    def upload_wiki_image(self, file=None, **fields):
+        return self.client.post(reverse('workspace_document_images'), {'file': file or art_file('Map Sketch.png'), **fields}, format='multipart')
+
+    def test_wiki_image_upload_is_private_with_random_storage_name(self):
+        response = self.upload_wiki_image()
+        self.assertEqual(response.status_code, 201, response.data)
+        image = DocumentImage.objects.get(pk=response.data['id'])
+        self.assertEqual(response.data['url'], f"{reverse('workspace_document_images')}{image.id}/")
+        self.assertEqual(response.data['file_name'], 'Map Sketch.png')
+        self.assertIsNone(response.data['document'])
+        self.assertEqual(response['Cache-Control'], 'private, no-store')
+        self.assertEqual(image.uploaded_by, self.artist)
+        self.assertEqual(image.file_size, len(b'\x89PNG\r\n\x1a\nconcept-art'))
+        self.assertTrue(image.file.name.startswith('wiki-images/'))
+        self.assertTrue(image.file.name.endswith('.png'))
+        self.assertNotIn('Map', image.file.name)
+        self.assertTrue(image.file.storage.exists(image.file.name))
+
+    def test_wiki_image_accepts_every_supported_format_and_strips_client_paths(self):
+        for filename, content in [('a.jpg', b'\xff\xd8\xff\xe0'), ('b.jpeg', b'\xff\xd8\xff\xe1'), ('c.gif', b'GIF89a'), ('d.webp', b'RIFF\x00\x00\x00\x00WEBPVP8 '), ('C:\\Users\\artist\\e.png', b'\x89PNG\r\n\x1a\n')]:
+            with self.subTest(filename=filename):
+                response = self.upload_wiki_image(art_file(filename, content))
+                self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data['file_name'], 'e.png')
+
+    def test_wiki_image_can_link_to_a_page_and_survives_page_deletion(self):
+        document = Document.objects.create(title='Lore', created_by=self.artist)
+        response = self.upload_wiki_image(document=str(document.id))
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data['document'], str(document.id))
+        missing = self.upload_wiki_image(document='00000000-0000-0000-0000-000000000000')
+        self.assertEqual(missing.status_code, 400)
+        document.delete()
+        self.assertIsNone(DocumentImage.objects.get(pk=response.data['id']).document)
+
+    def test_wiki_image_rejects_non_images_scripts_and_disguised_files(self):
+        for filename, content in [('vector.svg', b'<svg onload=alert(1)>'), ('vector.svg.png', b'\x89PNG\r\n\x1a\n'), ('page.html.jpg', b'\xff\xd8\xff'), ('fake.png', b'<script>'), ('notes.pdf', b'%PDF-1.7'), ('scene.blend', b'BLENDER'), ('noextension', b'\x89PNG\r\n\x1a\n'), ('empty.png', b'')]:
+            with self.subTest(filename=filename):
+                response = self.upload_wiki_image(art_file(filename, content))
+                self.assertEqual(response.status_code, 400, response.data)
+        self.assertEqual(self.client.post(reverse('workspace_document_images'), {}, format='multipart').status_code, 400)
+        self.assertFalse(DocumentImage.objects.exists())
+
+    @override_settings(WIKI_IMAGE_MAX_BYTES=10, REVIEW_UPLOAD_MAX_BYTES=50 * 1024 * 1024)
+    def test_oversize_wiki_image_is_rejected_by_its_own_limit(self):
+        response = self.upload_wiki_image()
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('limit', str(response.data['file'][0]))
+        self.assertFalse(DocumentImage.objects.exists())
+
+    def test_wiki_image_upload_requires_authentication(self):
+        self.client.cookies.clear()
+        self.assertEqual(self.upload_wiki_image().status_code, 401)
+        self.assertFalse(DocumentImage.objects.exists())
 
     def test_feedback_is_stored_and_only_admin_can_make_decisions(self):
         review = self.review()

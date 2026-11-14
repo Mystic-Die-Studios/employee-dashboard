@@ -3,6 +3,7 @@ from django.db import transaction
 from django.db.models import F, Prefetch
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
+from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -15,7 +16,7 @@ from user_app.auth_utils import CookieAuthentication
 from .github_service import sync_review
 from .models import ArtReview, Document, ReviewFeedback, Task
 from .serializers import (
-    DocumentSerializer, MemberSerializer, ReviewFeedbackSerializer,
+    DocumentImageUploadSerializer, DocumentSerializer, MemberSerializer, ReviewFeedbackSerializer,
     ReviewSerializer, ReviewUploadSerializer, TaskSerializer, is_reviewer,
 )
 
@@ -93,6 +94,24 @@ class DocumentView(WorkspaceAPIView):
             raise PermissionDenied('Only the page creator or an admin can delete it.')
         document.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class DocumentImagesView(WorkspaceAPIView):
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        serializer = DocumentImageUploadSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        upload = serializer.validated_data['file']
+        image = serializer.save(uploaded_by=request.user, file_name=upload.name, file_size=upload.size)
+        return Response({
+            'id': str(image.id),
+            # Served by the members-only image endpoint at documents/images/<id>/.
+            'url': f"{reverse('workspace_document_images')}{image.id}/",
+            'file_name': image.file_name,
+            'file_size': image.file_size,
+            'document': str(image.document_id) if image.document_id else None,
+        }, status=status.HTTP_201_CREATED)
 
 
 class TasksView(WorkspaceAPIView):

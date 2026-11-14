@@ -171,6 +171,7 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 # Artwork is private: never expose MEDIA_ROOT through a public web alias.
 MEDIA_ROOT = Path(os.getenv('REVIEW_MEDIA_ROOT') or BASE_DIR / 'private_uploads')
 REVIEW_UPLOAD_MAX_BYTES = int(os.getenv('REVIEW_UPLOAD_MAX_BYTES') or 50 * 1024 * 1024)
+WIKI_IMAGE_MAX_BYTES = int(os.getenv('WIKI_IMAGE_MAX_BYTES') or 10 * 1024 * 1024)
 DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'
 
 STORAGES = {
