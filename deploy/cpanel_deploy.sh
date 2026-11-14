@@ -12,11 +12,56 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APPROOT="${APPROOT:-$HOME/employee-dashboard}"
-VENV_GLOB="${VENV_GLOB:-$HOME/virtualenv/employee-dashboard}"
 
-say() { printf '\n==> %s\n' "$1"; }
+# cPanel names the virtualenv after the Application root. If the expected one is
+# missing but exactly one Python app exists on the account, follow it -- the app
+# often has to be recreated under a new name, and a deploy into the wrong
+# directory succeeds silently while the site keeps serving the old code.
+if [ ! -d "$HOME/virtualenv/$(basename "$APPROOT")" ]; then
+    _venvs=()
+    while read -r _v; do
+        [ -n "$_v" ] && _venvs+=("$_v")
+    done < <(ls -1d "$HOME"/virtualenv/*/ 2>/dev/null || true)
+    if [ "${#_venvs[@]}" -eq 1 ]; then
+        _name="$(basename "${_venvs[0]}")"
+        if [ "$_name" != "$(basename "$APPROOT")" ]; then
+            echo "NOTE: no virtualenv for '$(basename "$APPROOT")'."
+            echo "      Following the only Python app on this account: '$_name'."
+            echo "      Set APPROOT explicitly, or update .cpanel.yml, to silence this."
+            APPROOT="$HOME/$_name"
+        fi
+    fi
+fi
+
+VENV_GLOB="${VENV_GLOB:-$HOME/virtualenv/$(basename "$APPROOT")}"
+
+# Timestamped so that a slow step is distinguishable from a stuck one.
+say() { printf '\n==> [%s] %s\n' "$(date +%H:%M:%S)" "$1"; }
 
 say "Deploying $REPO_DIR -> $APPROOT"
+
+# Refuse to write application code and secrets into a public document root.
+# Passenger normally intercepts every request, but if it ever fails to boot,
+# Apache can fall back to serving these as plain files -- including .env.
+if [ "${ALLOW_DOCROOT_APPROOT:-0}" != "1" ]; then
+    for docroot in "$HOME/public_html" "$HOME"/*.*.*; do
+        [ -d "$docroot" ] || continue
+        case "$APPROOT/" in
+            "$docroot"/*)
+                if [ "$APPROOT" = "$docroot" ]; then
+                    echo "ERROR: the app root IS the document root ($APPROOT)." >&2
+                else
+                    echo "ERROR: app root $APPROOT sits inside the document root $docroot." >&2
+                fi
+                echo "Secrets in .env would be one Passenger failure away from public." >&2
+                echo "Recreate the Python App with an Application root outside it," >&2
+                echo "such as 'employee-dashboard'." >&2
+                echo "To deploy anyway: ALLOW_DOCROOT_APPROOT=1 bash $0" >&2
+                exit 1
+                ;;
+        esac
+    done
+fi
 mkdir -p "$APPROOT" "$APPROOT/tmp" "$APPROOT/frontend"
 
 say "Copying Django code"
@@ -27,9 +72,108 @@ else
     cp -Rf "$REPO_DIR/server/." "$APPROOT/"
 fi
 
+# The build toolchain's floor. Vite 8 refuses to run below this, and on an older
+# Node it fails deep inside the CLI rather than with a clean version error.
+REQUIRED_NODE="20.19.0"
+
+# Is $1 >= $2, comparing as versions rather than as strings?
+version_ge() {
+    [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n1)" = "$2" ]
+}
+
+# Every Node bin directory on the box. cPanel keeps them out of the default
+# PATH: EasyApache under /opt/cpanel, and "Setup Node.js App" under ~/nodevenv.
+node_bin_dirs() {
+    local dir
+    if command -v npm >/dev/null 2>&1; then
+        dirname "$(command -v npm)"
+    fi
+    for dir in /opt/cpanel/ea-nodejs*/bin "$HOME"/nodevenv/*/*/bin; do
+        [ -x "$dir/npm" ] && echo "$dir"
+    done
+}
+
+# Highest version that actually satisfies REQUIRED_NODE. Ask each node for its
+# own version -- the directory name is not reliable, and sorting paths would
+# rank ~/nodevenv/standup-bot/18 above ~/nodevenv/other/22.
+find_npm_dir() {
+    local dir ver best="" best_ver=""
+    while read -r dir; do
+        [ -n "$dir" ] || continue
+        ver="$("$dir/node" -v 2>/dev/null | sed 's/^v//')" || continue
+        [ -n "$ver" ] || continue
+        version_ge "$ver" "$REQUIRED_NODE" || continue
+        if [ -z "$best_ver" ] || version_ge "$ver" "$best_ver"; then
+            best="$dir"
+            best_ver="$ver"
+        fi
+    done < <(node_bin_dirs)
+    [ -n "$best" ] && echo "$best"
+}
+
+report_node_versions() {
+    local dir ver
+    while read -r dir; do
+        [ -n "$dir" ] || continue
+        ver="$("$dir/node" -v 2>/dev/null || echo '?')"
+        echo "  $ver  $dir" >&2
+    done < <(node_bin_dirs)
+}
+
+NPM_DIR="${NODE_BIN_DIR:-$(find_npm_dir || true)}"
+if [ -n "$NPM_DIR" ] && [ -x "$NPM_DIR/npm" ]; then
+    export PATH="$NPM_DIR:$PATH"
+elif [ -n "$(node_bin_dirs)" ]; then
+    echo "ERROR: Node $REQUIRED_NODE or newer is required to build the frontend." >&2
+    echo "Found only:" >&2
+    report_node_versions
+    echo "" >&2
+    echo "In cPanel > Setup Node.js App, create an application with Node 20 or 22" >&2
+    echo "(any app root -- it exists purely to install the runtime), then re-run." >&2
+    echo "Alternatively build locally and upload client/dist to $APPROOT/frontend/." >&2
+    exit 1
+fi
+
 say "Building the frontend"
 if command -v npm >/dev/null 2>&1; then
-    ( cd "$REPO_DIR/client" && npm ci --no-audit --no-fund && npm run build )
+    # CloudLinux nodevenv wraps npm and appends --prefix <nodevenv>/lib.
+    # That overrides the project directory even after cd, so npm ci cannot
+    # find its lockfile. Invoke the runtime's npm CLI directly instead.
+    NODE_EXECUTABLE="$(node -p 'process.execPath')"
+    NPM_CLI="$("$NODE_EXECUTABLE" -e '
+        const fs = require("fs");
+        const path = require("path");
+        const runtime = path.dirname(process.execPath);
+        const candidates = [
+            path.resolve(runtime, "../lib/node_modules/npm/bin/npm-cli.js"),
+            path.resolve(runtime, "../node_modules/npm/bin/npm-cli.js"),
+        ];
+        const cli = candidates.find(candidate => fs.existsSync(candidate));
+        if (!cli) process.exit(1);
+        process.stdout.write(cli);
+    ')" || {
+        echo "ERROR: cannot locate npm-cli.js beside $NODE_EXECUTABLE." >&2
+        exit 1
+    }
+    echo "Using npm $("$NODE_EXECUTABLE" "$NPM_CLI" --version) via $NPM_CLI"
+    # Cypress pulls a ~200 MB binary from a postinstall hook. The server never
+    # runs the E2E suite, and on a shared host that download is the single most
+    # common reason this step appears to hang.
+    export CYPRESS_INSTALL_BINARY=0
+    # Keep npm from stalling on a TTY-less terminal waiting to render progress.
+    export npm_config_progress=false
+    # cPanel's Node virtualenv exports NODE_ENV=development, and Vite honours an
+    # already-set NODE_ENV. Left alone that ships React's development build:
+    # ~60% larger, slower, and full of dev-only warnings.
+    export NODE_ENV=production
+    # Avoid V8's large WebAssembly virtual-memory reservation on shared hosting.
+    export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--disable-wasm-trap-handler"
+    (
+        cd "$REPO_DIR/client"
+        # Build tools are devDependencies, including when NODE_ENV=production.
+        "$NODE_EXECUTABLE" "$NPM_CLI" --prefix "$REPO_DIR/client" ci --include=dev --no-audit --no-fund --loglevel=http
+        "$NODE_EXECUTABLE" "$NPM_CLI" --prefix "$REPO_DIR/client" run build
+    )
     cp -Rf "$REPO_DIR/client/dist/." "$APPROOT/frontend/"
 elif [ -d "$REPO_DIR/client/dist" ]; then
     echo "npm not found; using the client/dist committed to the repo."
@@ -39,16 +183,58 @@ elif [ -f "$APPROOT/frontend/index.html" ]; then
     echo "Keeping the frontend already deployed at $APPROOT/frontend."
 else
     echo "ERROR: no way to produce a frontend build." >&2
-    echo "Install Node on the host, or build locally and upload client/dist" >&2
-    echo "to $APPROOT/frontend/." >&2
+    echo "npm was not found on PATH, under /opt/cpanel/ea-nodejs*/bin, or in" >&2
+    echo "$HOME/nodevenv/*/*/bin. Options:" >&2
+    echo "  - point at it directly: NODE_BIN_DIR=/path/to/bin bash $0" >&2
+    echo "  - create any app in cPanel > Setup Node.js App to install Node" >&2
+    echo "  - build locally (npm run build in client/) and upload client/dist" >&2
+    echo "    to $APPROOT/frontend/" >&2
     exit 1
 fi
 
+# Django 5.2's floor. Below it, pip cannot resolve requirements.txt at all and
+# fails with a wall of available-version noise that hides the real cause.
+REQUIRED_PYTHON="3.10"
+
 # cPanel creates the virtualenv under ~/virtualenv/<app root>/<python version>/.
-ACTIVATE="$(ls -1 "$VENV_GLOB"/*/bin/activate 2>/dev/null | head -n 1 || true)"
+# Ask each interpreter for its version rather than trusting the directory name,
+# and prefer the newest that can actually run Django.
+find_venv() {
+    local venv ver best="" best_ver=""
+    for venv in "$VENV_GLOB"/*/; do
+        [ -x "$venv/bin/python" ] || continue
+        ver="$("$venv/bin/python" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)" || continue
+        [ -n "$ver" ] || continue
+        version_ge "$ver" "$REQUIRED_PYTHON" || continue
+        if [ -z "$best_ver" ] || version_ge "$ver" "$best_ver"; then
+            best="$venv"
+            best_ver="$ver"
+        fi
+    done
+    [ -n "$best" ] && echo "${best%/}/bin/activate"
+}
+
+ACTIVATE="$(find_venv || true)"
 if [ -z "$ACTIVATE" ]; then
-    echo "ERROR: no virtualenv found under $VENV_GLOB." >&2
-    echo "Create the app in cPanel > Setup Python App first." >&2
+    if [ -n "$(ls -d "$VENV_GLOB"/*/ 2>/dev/null || true)" ]; then
+        echo "ERROR: Python $REQUIRED_PYTHON or newer is required (Django 5.2)." >&2
+        echo "Virtualenvs found for this app, and their versions:" >&2
+        for venv in "$VENV_GLOB"/*/; do
+            [ -x "$venv/bin/python" ] || continue
+            echo "  $("$venv/bin/python" -V 2>&1)  $venv" >&2
+        done
+        echo "" >&2
+        echo "In cPanel > Setup Python App, destroy this application and recreate" >&2
+        echo "it with Python 3.11 or newer. Keep Application root '$(basename "$APPROOT")'" >&2
+        echo "and Application URL 'dashboard.mysticdie.com'. Your .env is outside" >&2
+        echo "the app's virtualenv, so it survives." >&2
+    else
+        echo "ERROR: no virtualenv found under $VENV_GLOB." >&2
+        echo "cPanel names it after the Application root, so this usually means the" >&2
+        echo "Python App root and APPROOT ($APPROOT) disagree." >&2
+        echo "Virtualenvs that do exist:" >&2
+        ls -1d "$HOME"/virtualenv/*/ 2>/dev/null >&2 || echo "  (none)" >&2
+    fi
     exit 1
 fi
 

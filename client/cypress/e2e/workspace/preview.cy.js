@@ -10,7 +10,7 @@ describe("Studio workspace preview", () => {
 
   it("opens without authentication and creates a document that survives refresh", () => {
     cy.viewport(1440, 1000);
-    cy.contains("Your next great idea starts here.").should("be.visible");
+    cy.contains("h1", "Home").should("be.visible");
     cy.get("@previewApi.all").should("have.length", 0);
     cy.document().then((doc) => {
       cy.wrap(doc.documentElement.scrollWidth).should("be.at.most", 1440);
@@ -27,7 +27,7 @@ describe("Studio workspace preview", () => {
       "The opening scene needs a clearer objective.",
     );
     cy.reload();
-    cy.contains("Your next great idea starts here.").should("be.visible");
+    cy.contains("h1", "Home").should("be.visible");
     cy.contains("button", "Documents").click();
     cy.get('[aria-label="Search documents"]').type("Playtest");
     cy.contains(".document-card", "Playtest observations").click();
@@ -47,7 +47,7 @@ describe("Studio workspace preview", () => {
       cy.get("select").select("Done");
     });
     cy.reload();
-    cy.contains("Your next great idea starts here.").should("be.visible");
+    cy.contains("h1", "Home").should("be.visible");
     cy.contains("button", "Projects").click();
     cy.contains(".column-heading h3", "Done")
       .closest(".kanban-column")
@@ -68,7 +68,7 @@ describe("Studio workspace preview", () => {
 
   it("keeps navigation and content accessible on a narrow screen", () => {
     cy.viewport(390, 844);
-    cy.contains("Your next great idea starts here.").should("be.visible");
+    cy.contains("h1", "Home").should("be.visible");
     cy.get('[aria-label="Open navigation"]').click();
     cy.contains("button", "Documents").click();
     cy.get('[aria-label="Search documents"]').should("be.visible");

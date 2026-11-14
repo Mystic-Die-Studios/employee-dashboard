@@ -111,6 +111,26 @@ describe("Authenticated studio platform", () => {
     cy.clearLocalStorage();
   });
 
+  it("opens every sidebar section and restores document links after refresh", () => {
+    const workspace = serverWorkspace({ documents: [documentRecord()] });
+    signIn(workspace);
+    openDashboard();
+
+    for (const view of ["Projects", "Documents", "My tasks", "Reviews", "Team", "Home"]) {
+      cy.get('nav[aria-label="Workspace navigation"]').contains("button", view).click();
+      cy.get('nav[aria-label="Workspace navigation"] [aria-current="page"]').should("contain", view);
+      cy.get(".page-heading h1").should("have.text", view);
+    }
+
+    cy.contains(".pinned-page", "Server studio wiki").click();
+    cy.location("search").should("include", `doc=${documentId}`);
+    cy.reload();
+    cy.wait("@workspaceLoaded");
+    cy.get('[aria-label="Document title"]').should("have.value", "Server studio wiki");
+    cy.contains("button", "All documents").click();
+    cy.get(".document-card").should("contain", "Server studio wiki");
+  });
+
   it("saves a wiki page to the server and safely previews Markdown", () => {
     const workspace = serverWorkspace();
     signIn(workspace);

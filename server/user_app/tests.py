@@ -3,7 +3,7 @@ from unittest.mock import patch
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from .auth_utils import OAUTH_STATE_COOKIE
+from .auth_utils import OAUTH_STATE_COOKIE, github_api
 from .models import User
 
 
@@ -75,6 +75,18 @@ class GitHubCallbackViewTests(TestCase):
         return self.client.get(reverse('github_callback'), query)
 
     @patch('user_app.auth_utils.requests.get')
+    def test_github_api_uses_oauth_token_for_authentication(self, mock_get):
+        mock_get.return_value = FakeResponse(200, {'state': 'active'})
+
+        response = github_api('gh-token', '/user/memberships/orgs/Mystic-Die-Studios')
+
+        self.assertEqual(response, (200, {'state': 'active'}))
+        self.assertEqual(
+            mock_get.call_args.kwargs['headers']['Authorization'],
+            'Bearer ' + 'gh-token',
+        )
+
+    @patch('user_app.auth_utils.requests.get')
     @patch('user_app.auth_utils.requests.post')
     def test_org_member_gets_tokens_and_lands_on_dashboard(self, mock_post, mock_get):
         mock_post.return_value = FakeResponse(200, {'access_token': 'gh-token'})
@@ -130,6 +142,17 @@ class GitHubCallbackViewTests(TestCase):
     def test_unreadable_membership_is_reported_separately(self, mock_post, mock_get):
         mock_post.return_value = FakeResponse(200, {'access_token': 'gh-token'})
         mock_get.side_effect = self.github_responses(membership_status=500)
+
+        response = self.callback()
+
+        self.assertEqual(response['Location'], 'http://localhost:5173/?error=org_check_failed')
+        self.assertFalse(User.objects.exists())
+
+    @patch('user_app.auth_utils.requests.get')
+    @patch('user_app.auth_utils.requests.post')
+    def test_forbidden_membership_lookup_is_not_treated_as_non_membership(self, mock_post, mock_get):
+        mock_post.return_value = FakeResponse(200, {'access_token': 'gh-token'})
+        mock_get.side_effect = self.github_responses(membership_status=403)
 
         response = self.callback()
 

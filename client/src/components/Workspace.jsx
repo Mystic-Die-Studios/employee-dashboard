@@ -20,7 +20,7 @@ const initialDocuments = [
     category: "Getting started",
     icon: "✦",
     updated: "Just now",
-    body: "# A little magic. A lot of making.\n\nThis is our shared home for the ideas, decisions, and details that bring our games to life.\n\n## Start here\nExplore the project board to see what we are building. Keep your notes in Documents, and use My tasks to find your next move.\n\n## How we work\n- Make room for bold ideas.\n- Write things down.\n- Share early, give thoughtful feedback, and keep moving together.",
+    body: "# Studio Workspace\n\n## Navigation\n- Projects: view tasks by status.\n- Documents: create and edit Markdown pages.\n- My tasks: view tasks assigned to you.\n- Reviews: upload artwork and read feedback.\n- Team: view workspace members.",
   },
   {
     id: "direction",
@@ -28,7 +28,7 @@ const initialDocuments = [
     category: "Project Reconnection",
     icon: "◈",
     updated: "Today",
-    body: "PROJECT RECONNECTION\n\nA world worth getting lost in.\n\nOur creative pillars\n• Discovery should feel personal.\n• Every environment tells a story.\n• Small moments make a lasting impression.\n\nUse this document to collect visual references, narrative ideas, and decisions as the project develops.",
+    body: "# Project Reconnection\n\nUse this document to collect visual references, narrative ideas, and creative decisions for the project.",
   },
   {
     id: "onboarding",
@@ -234,7 +234,7 @@ function TaskDialog({ onClose, onSubmit, initialStatus, busy, error }) {
       }}
     >
       <div className="section-heading">
-        <h2 id="task-modal-title">A new step forward.</h2>
+        <h2 id="task-modal-title">New task</h2>
         <button onClick={onClose} disabled={busy} aria-label="Close task form">
           ✕
         </button>
@@ -560,7 +560,7 @@ export default function Workspace({ user, onLogout, preview = false }) {
         <div className="workspace-switch">
           <span className="workspace-avatar">M</span>
           <span>
-            Mystic Die Studios<small>Let’s make something great</small>
+            Mystic Die Studios<small>Studio Workspace</small>
           </span>
         </div>
         <p className="nav-label">WORKSPACE</p>
@@ -611,10 +611,10 @@ export default function Workspace({ user, onLogout, preview = false }) {
         ))}
         <div className="sidebar-note">
           <span>✧</span>
-          <h4>Good things start here.</h4>
-          <p>A shared space for the things we’re making together.</p>
+          <h4>Markdown pages</h4>
+          <p>Create a page for notes or documentation.</p>
           <button onClick={newDocument} disabled={Boolean(busy) || loading || Boolean(loadError)}>
-            Capture an idea <Icon name="arrow" size={16} />
+            Create page <Icon name="arrow" size={16} />
           </button>
         </div>
         <div className="account">
@@ -658,7 +658,7 @@ export default function Workspace({ user, onLogout, preview = false }) {
           </div>
           <span className="studio-status">
             <span />
-            Studio workspace
+            Studio Workspace
           </span>
         </header>
         {preview && <div className="preview-banner">
@@ -685,32 +685,22 @@ export default function Workspace({ user, onLogout, preview = false }) {
                 MYSTIC DIE STUDIOS / {view.toUpperCase()}
               </p>
               <h1>
-                {selected
-                  ? "Make room for ideas."
-                  : view === "Home"
-                    ? "Your next great idea starts here."
-                    : view === "Projects"
-                      ? "Small steps. Big worlds."
-                      : view === "Documents"
-                        ? "A home for what we know."
-                        : view === "My tasks"
-                          ? "Find your next move."
-                        : view === "Reviews"
-                          ? "Create. Share. Refine."
-                          : "Made better, together."}
+                {selected ? "Edit document" : view}
               </h1>
               <p className="page-subtitle">
-                {view === "Home"
-                  ? "Your projects, people, and possibilities. All in one place."
+                {selected
+                  ? "Edit the title and Markdown content. Use Preview to check formatting."
+                  : view === "Home"
+                  ? "View project and task counts, and open documents."
                   : view === "Projects"
-                    ? "Keep the work moving, from the first spark to the final detail."
+                    ? "View project tasks by status and create new tasks."
                     : view === "Documents"
-                      ? "Capture ideas, share knowledge, and keep everyone on the same page."
+                      ? "Create, search, and edit Markdown pages."
                       : view === "My tasks"
-                        ? "A little focus goes a long way. Here’s what’s on your plate."
+                        ? "View and update tasks assigned to you."
                         : view === "Reviews"
                           ? "Upload artwork, collect feedback, and track every review in one place."
-                        : "The people behind the magic. Your studio’s GitHub member directory."}
+                        : "View workspace members and their roles."}
               </p>
             </div>
             {view !== "Team" && <button
@@ -741,19 +731,12 @@ export default function Workspace({ user, onLogout, preview = false }) {
             <>
               <section className="welcome-card">
                 <div className="welcome-copy">
-                  <span className="pill">THE STUDIO, IN SYNC</span>
-                  <h2>
-                    Build worlds.
-                    <br />
-                    Bring ideas to life.
-                  </h2>
+                  <h2>Studio Workspace</h2>
                   <p>
-                    One space for the stories we tell,
-                    <br />
-                    the work we do, and the team behind it.
+                    Manage project tasks, edit documentation, and review artwork.
                   </p>
                   <button onClick={() => go("Projects")}>
-                    Explore your projects <Icon name="arrow" size={18} />
+                    Open project board <Icon name="arrow" size={18} />
                   </button>
                 </div>
                 <div className="hero-art" aria-hidden="true">
@@ -767,18 +750,18 @@ export default function Workspace({ user, onLogout, preview = false }) {
               </section>
               <div className="stats-row">
                 {[
-                  ["project", "Active projects", projectCount, "Worlds in the making"],
+                  ["project", "Active projects", projectCount, "View project board"],
                   [
                     "document",
                     "Shared documents",
                     data.documents.length,
-                    "Ideas, made accessible",
+                    "Open documents",
                   ],
                   [
                     "task",
                     "Open tasks",
                     data.tasks.length - complete,
-                    "Moving things forward",
+                    "View your tasks",
                   ],
                 ].map(([icon, label, count, description]) => (
                   <button
@@ -807,7 +790,7 @@ export default function Workspace({ user, onLogout, preview = false }) {
                 ))}
               </div>
               <div className="section-heading">
-                <h2>Pick up where you left off</h2>
+                <h2>Documents</h2>
                 <button onClick={() => go("Documents")}>
                   All documents <Icon name="arrow" size={16} />
                 </button>
@@ -816,7 +799,6 @@ export default function Workspace({ user, onLogout, preview = false }) {
               <section className="project-summary">
                 <span className="project-emblem">◈</span>
                 <div>
-                  <span className="eyebrow">IN THE MAKING</span>
                   <h3>Studio workflow</h3>
                   <p>Documents, tasks, and art reviews in one shared workspace.</p>
                 </div>
@@ -894,7 +876,7 @@ export default function Workspace({ user, onLogout, preview = false }) {
               </div>
               {editorMode === "Write" ? <textarea
                 aria-label="Document content"
-                placeholder="# Your next great idea\n\nWrite Markdown: headings, lists, links, tables, and checklists."
+                placeholder="Write Markdown: headings, lists, links, tables, and checklists."
                 value={draft.body}
                 disabled={Boolean(busy)}
                 onChange={(e) => updateDocument("body", e.target.value)}
@@ -1052,7 +1034,6 @@ export default function Workspace({ user, onLogout, preview = false }) {
             </div>
           )}
           <footer className="workspace-footer">
-            <span>✦ Made of ideas. Built together.</span>
             <span>Mystic Die Studios</span>
           </footer>
         </main>
