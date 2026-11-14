@@ -7,6 +7,9 @@ import {
   loadWorkspace,
   saveDocument,
   saveTask,
+  uploadDocumentImage,
+  WIKI_IMAGE_ACCEPT,
+  WIKI_IMAGE_MAX_BYTES,
   workspaceError,
 } from "../api/workspace";
 import MarkdownPreview from "./Markdown";
@@ -113,6 +116,12 @@ const previewReviews = [{
   can_review: false,
   can_sync: false,
 }];
+
+// "Map Sketch.png" -> "![Map Sketch](url)". Brackets and backslashes would break the alt text.
+function imageMarkdown(fileName, url) {
+  const alt = fileName.replace(/\.[^.]+$/, "").replace(/[[\]\\]/g, "").trim() || "image";
+  return `![${alt}](${url})`;
+}
 
 function Icon({ name, size = 20 }) {
   const paths = {
@@ -300,6 +309,10 @@ export default function Workspace({ user, onLogout, preview = false }) {
   const [taskError, setTaskError] = useState("");
   const [reviewForm, setReviewForm] = useState(false);
   const storageWarning = useRef(null);
+  const bodyEditor = useRef(null);
+  const pendingCursor = useRef(null);
+  const imagePicker = useRef(null);
+  const openPage = useRef(null);
   const [query, setQuery] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [taskForm, setTaskForm] = useState(false);
@@ -414,6 +427,62 @@ export default function Workspace({ user, onLogout, preview = false }) {
         d.id === selectedId ? { ...d, [field]: value, updated: "Just now" } : d,
       ),
     }));
+  }
+  // Inserts text at the cursor (replacing any selection), or at the end if the editor is not open.
+  // Reads the live textarea so text typed while an upload was running is kept.
+  // `block` puts the text on its own line, adding line breaks only where needed.
+  function insertIntoBody(text, { block = false } = {}) {
+    const editor = bodyEditor.current;
+    const body = editor ? editor.value : draft?.body ?? "";
+    const start = editor ? editor.selectionStart : body.length;
+    const end = editor ? editor.selectionEnd : body.length;
+    const before = body.slice(0, start);
+    const after = body.slice(end);
+    let inserted = text;
+    if (block && before && !before.endsWith("\n")) inserted = `\n${inserted}`;
+    if (block && after && !after.startsWith("\n")) inserted = `${inserted}\n`;
+    updateDocument("body", before + inserted + after);
+    pendingCursor.current = start + inserted.length;
+  }
+  // After the inserted text renders, put the cursor just after it. Waits until the
+  // editor is enabled again, because a disabled textarea cannot take focus.
+  useEffect(() => {
+    const editor = bodyEditor.current;
+    if (pendingCursor.current === null || !editor || editor.disabled) return;
+    editor.focus();
+    editor.setSelectionRange(pendingCursor.current, pendingCursor.current);
+    pendingCursor.current = null;
+  });
+  // Tracks the page on screen so a slow upload never lands in a page the member has left.
+  useEffect(() => { openPage.current = selectedId; }, [selectedId]);
+  async function insertImage(event) {
+    const file = event.target.files?.[0];
+    event.target.value = ""; // Allow picking the same file again later.
+    if (!file || !selected || busy) return;
+    const extension = file.name.includes(".") ? `.${file.name.split(".").pop().toLowerCase()}` : "";
+    if (!WIKI_IMAGE_ACCEPT.split(",").includes(extension)) {
+      setNotice("Upload an image: PNG, JPEG, WebP, or GIF.");
+      return;
+    }
+    if (file.size > WIKI_IMAGE_MAX_BYTES) {
+      setNotice(`The image exceeds the ${WIKI_IMAGE_MAX_BYTES / (1024 * 1024)} MB limit.`);
+      return;
+    }
+    const pageId = selected.id;
+    setBusy("upload-image");
+    setNotice("");
+    try {
+      const image = await uploadDocumentImage(file, pageId);
+      const markdown = imageMarkdown(image.file_name, image.url);
+      if (openPage.current === pageId) insertIntoBody(markdown, { block: true });
+      else setNotice(`The image was uploaded, but you left the page first. Paste this where you want it: ${markdown}`);
+    } catch (failure) {
+      // Show the server's file message without the "file: " field prefix.
+      const fileError = failure.response?.data?.file?.[0];
+      setNotice(typeof fileError === "string" ? fileError : workspaceError(failure, "The image could not be uploaded. Try again."));
+    } finally {
+      setBusy("");
+    }
   }
   async function changeStatus(id, status) {
     if (busy) return;
@@ -856,7 +925,7 @@ export default function Workspace({ user, onLogout, preview = false }) {
                 <button onClick={() => go("Documents")}>
                   ← All documents
                 </button>
-                {preview ? <span ref={storageWarning} role="status">Saved in this browser</span> : <span role="status">{busy === "save-document" ? "Saving page…" : documentDirty ? "Unsaved changes" : "Saved to studio workspace"}</span>}
+                {preview ? <span ref={storageWarning} role="status">Saved in this browser</span> : <span role="status">{busy === "save-document" ? "Saving page…" : busy === "upload-image" ? "Uploading image…" : documentDirty ? "Unsaved changes" : "Saved to studio workspace"}</span>}
                 {!preview && <button className="primary-button" onClick={savePage} disabled={!documentDirty || Boolean(busy) || Boolean(conflicts[selected.id])}>Save page</button>}
               </div>
               <span className="editor-symbol">{selected.icon}</span>
@@ -871,10 +940,19 @@ export default function Workspace({ user, onLogout, preview = false }) {
               <span className="editor-category">
                 {selected.category} <span>•</span> Studio document
               </span>
-              <div className="editor-modes" role="tablist" aria-label="Document editor mode">
-                {["Write", "Preview"].map((mode) => <button role="tab" key={mode} aria-selected={editorMode === mode} onClick={() => setEditorMode(mode)}>{mode}</button>)}
+              <div className="editor-bar">
+                <div className="editor-modes" role="tablist" aria-label="Document editor mode">
+                  {["Write", "Preview"].map((mode) => <button role="tab" key={mode} aria-selected={editorMode === mode} onClick={() => setEditorMode(mode)}>{mode}</button>)}
+                </div>
+                {!preview && editorMode === "Write" && <>
+                  <input ref={imagePicker} type="file" accept={WIKI_IMAGE_ACCEPT} hidden onChange={insertImage} />
+                  <button className="editor-insert-image" onClick={() => imagePicker.current?.click()} disabled={Boolean(busy) || Boolean(conflicts[selected.id])}>
+                    {busy === "upload-image" ? "Uploading…" : "Insert image"}
+                  </button>
+                </>}
               </div>
               {editorMode === "Write" ? <textarea
+                ref={bodyEditor}
                 aria-label="Document content"
                 placeholder="Write Markdown: headings, lists, links, tables, and checklists."
                 value={draft.body}

@@ -184,6 +184,11 @@
 .open-document-tabs button span { color: var(--workspace-magenta); }
 .editor-modes { display: flex; gap: 7px; margin-bottom: 22px; }
 .editor-modes button { padding: 7px 12px; border: 1px solid var(--workspace-line); border-radius: 6px; background: transparent; color: var(--workspace-muted); font-size: 11px; }
+.editor-bar { display: flex; align-items: flex-start; justify-content: space-between; gap: 7px; }
+/* .editor-bar prefix outranks the generic ".workspace button { font: inherit }" rule. */
+.editor-bar .editor-insert-image { padding: 7px 12px; border: 1px solid var(--workspace-line); border-radius: 6px; background: transparent; color: var(--workspace-accent); font-size: 11px; }
+.editor-bar .editor-insert-image:hover:not(:disabled) { background: var(--workspace-hover); }
+.editor-bar .editor-insert-image:disabled { color: var(--workspace-muted); }
 .editor-modes button[aria-selected="true"] { background: var(--workspace-purple-soft); color: var(--workspace-accent); border-color: var(--workspace-accent-border); }
 .editor-toolbar .primary-button { background: var(--workspace-purple); color: white; }
 .editor-footnote { display: flex; flex-wrap: wrap; align-items: center; gap: 15px; justify-content: space-between; }

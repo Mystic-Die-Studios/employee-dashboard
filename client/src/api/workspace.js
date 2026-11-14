@@ -10,6 +10,19 @@ export const saveDocument = (id, document) =>
   data(api.patch(`${workspacePath}documents/${id}/`, document));
 export const deleteDocument = (id) =>
   data(api.delete(`${workspacePath}documents/${id}/`));
+// Must match the server's WIKI_IMAGE_EXTENSIONS and default WIKI_IMAGE_MAX_BYTES.
+// The server re-checks everything; these only give quick feedback in the browser.
+export const WIKI_IMAGE_ACCEPT = ".png,.jpg,.jpeg,.webp,.gif";
+export const WIKI_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+
+// Resolves to { id, url, file_name, file_size, document }. `url` is a relative
+// path: store it in the page as-is so the page works in every environment.
+export function uploadDocumentImage(file, documentId) {
+  const form = new FormData();
+  form.append("file", file);
+  if (documentId) form.append("document", documentId);
+  return data(api.post(`${workspacePath}documents/images/`, form));
+}
 export const createTask = (task) => data(api.post(`${workspacePath}tasks/`, task));
 export const saveTask = (id, changes) =>
   data(api.patch(`${workspacePath}tasks/${id}/`, changes));
