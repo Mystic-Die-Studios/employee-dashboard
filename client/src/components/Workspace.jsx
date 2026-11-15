@@ -477,6 +477,8 @@ export default function Workspace({ user, onLogout, preview = false }) {
   const openPage = useRef(null);
   const [imageDropTarget, setImageDropTarget] = useState(false);
   const [query, setQuery] = useState("");
+  const [folderFilter, setFolderFilter] = useState("");
+  const [documentSort, setDocumentSort] = useState("updated");
   const [menuOpen, setMenuOpen] = useState(false);
   const [taskForm, setTaskForm] = useState(false);
   const [notice, setNotice] = useState("");
@@ -491,6 +493,18 @@ export default function Workspace({ user, onLogout, preview = false }) {
       .toLowerCase()
       .includes(query.toLowerCase()),
   );
+  const folders = [...new Set(data.documents.map((d) => d.category).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  // A folder that no longer exists (renamed or emptied) falls back to all folders.
+  const activeFolder = folders.includes(folderFilter) ? folderFilter : "";
+  const byUpdated = (a, b) => (a.updated_at && b.updated_at ? b.updated_at.localeCompare(a.updated_at) : 0);
+  const byTitle = (a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
+  const shownDocuments = filteredDocuments
+    .filter((d) => !activeFolder || d.category === activeFolder)
+    .sort(documentSort === "title" ? byTitle : byUpdated);
+  const folderGroups = [...new Set(shownDocuments.map((d) => d.category))]
+    .sort((a, b) => a.localeCompare(b))
+    .map((name) => [name, shownDocuments.filter((d) => d.category === name)]);
+  const recentDocuments = [...data.documents].sort(byUpdated).slice(0, 3);
   const filteredTasks = data.tasks.filter((t) =>
     `${t.title} ${t.project}`.toLowerCase().includes(query.toLowerCase()),
   );
@@ -562,7 +576,7 @@ export default function Workspace({ user, onLogout, preview = false }) {
     if (busy || loading || loadError) return;
     const fields = {
       title: "Untitled document",
-      category: "Studio wiki",
+      category: activeFolder || "Studio wiki",
       icon: "▤",
       body: "",
     };
@@ -771,7 +785,7 @@ export default function Workspace({ user, onLogout, preview = false }) {
     setBusy("save-document");
     setNotice("");
     try {
-      const saved = await saveDocument(selected.id, { title: draft.title.trim(), body: draft.body, version: draft.version });
+      const saved = await saveDocument(selected.id, { title: draft.title.trim(), category: (draft.category ?? "").trim() || "Studio wiki", body: draft.body, version: draft.version });
       setData((current) => ({ ...current, documents: current.documents.map((doc) => doc.id === saved.id ? saved : doc) }));
       setDrafts((current) => { const next = { ...current }; delete next[saved.id]; return next; });
     } catch (failure) {
@@ -829,28 +843,40 @@ export default function Workspace({ user, onLogout, preview = false }) {
     } finally { setBusy(""); }
   }
 
+  const documentCard = (doc) => (
+    <button
+      className="document-card"
+      key={doc.id}
+      onClick={() => openDocument(doc.id)}
+    >
+      <span className="document-symbol">{pageIcon(doc.icon)}</span>
+      <span className="eyebrow">{doc.category}</span>
+      <h3>{doc.title}</h3>
+      <p>{documentExcerpt(doc.body)}</p>
+      <span className="document-footer">
+        Edited {doc.updated.toLowerCase()} <Icon name="arrow" size={16} />
+      </span>
+    </button>
+  );
+  const noDocuments = <p className="empty-state">No documents found.</p>;
   const documentList = (
     <div className="document-grid">
-      {filteredDocuments.map((doc) => (
-        <button
-          className="document-card"
-          key={doc.id}
-          onClick={() => openDocument(doc.id)}
-        >
-          <span className="document-symbol">{pageIcon(doc.icon)}</span>
-          <span className="eyebrow">{doc.category}</span>
-          <h3>{doc.title}</h3>
-          <p>{documentExcerpt(doc.body)}</p>
-          <span className="document-footer">
-            Edited {doc.updated.toLowerCase()} <Icon name="arrow" size={16} />
-          </span>
-        </button>
+      {[...filteredDocuments].sort(byUpdated).map(documentCard)}
+      {!filteredDocuments.length && noDocuments}
+    </div>
+  );
+  const documentFolders = (
+    <div className="document-folders">
+      {folderGroups.map(([name, docs]) => (
+        <section className="document-folder" key={name} aria-label={`Folder ${name}`}>
+          <div className="section-heading">
+            <h2>{name}</h2>
+            <span className="toolbar-count">{docs.length}</span>
+          </div>
+          <div className="document-grid">{docs.map(documentCard)}</div>
+        </section>
       ))}
-      {!filteredDocuments.length && (
-        <p className="empty-state">
-          No documents found. Try another search or create a page.
-        </p>
-      )}
+      {!shownDocuments.length && noDocuments}
     </div>
   );
 
@@ -904,12 +930,12 @@ export default function Workspace({ user, onLogout, preview = false }) {
           ))}
         </nav>
         <div className="nav-section-heading">
-          <p className="nav-label">PINNED PAGES</p>
+          <p className="nav-label">RECENT PAGES</p>
           <button aria-label="Create document" onClick={newDocument} disabled={Boolean(busy) || loading || Boolean(loadError)}>
             <Icon name="plus" size={16} />
           </button>
         </div>
-        {data.documents.slice(0, 3).map((d) => (
+        {recentDocuments.map((d) => (
           <button
             key={d.id}
             className="pinned-page"
@@ -1050,18 +1076,25 @@ export default function Workspace({ user, onLogout, preview = false }) {
           {view !== "Home" && view !== "Team" && !selected && !reviewId && (
             <div className="view-toolbar">
               <div className="view-tabs">
-                <span className="selected-tab">
+                {view === "Documents" ? <>
+                  <select aria-label="Folder" value={activeFolder} onChange={(e) => setFolderFilter(e.target.value)}>
+                    <option value="">All folders</option>
+                    {folders.map((name) => <option key={name} value={name}>{name}</option>)}
+                  </select>
+                  <select aria-label="Sort documents" value={documentSort} onChange={(e) => setDocumentSort(e.target.value)}>
+                    <option value="updated">Last updated</option>
+                    <option value="title">Title A–Z</option>
+                  </select>
+                </> : <span className="selected-tab">
                   {view === "Projects"
                     ? "Project board"
-                    : view === "Documents"
-                      ? "Markdown wiki · All documents"
-                      : view === "Reviews"
-                        ? "Review tickets"
-                      : "Assigned to me"}
-                </span>
+                    : view === "Reviews"
+                      ? "Review tickets"
+                    : "Assigned to me"}
+                </span>}
                 <span className="toolbar-count">
                   {view === "Documents"
-                    ? filteredDocuments.length
+                    ? shownDocuments.length
                     : view === "Reviews"
                       ? data.reviews.length
                     : filteredTasks.filter(
@@ -1080,7 +1113,7 @@ export default function Workspace({ user, onLogout, preview = false }) {
               </label>
             </div>
           )}
-          {view === "Documents" && !selected && documentList}
+          {view === "Documents" && !selected && documentFolders}
           {selected && (
             <section className="document-editor">
               <div className="editor-toolbar">
@@ -1099,7 +1132,11 @@ export default function Workspace({ user, onLogout, preview = false }) {
                 disabled={Boolean(busy)}
                 onChange={(e) => updateDocument("title", e.target.value)}
               />
-              <span className="editor-category">{selected.category}</span>
+              <label className="editor-category">
+                Folder
+                <input aria-label="Folder name" list="document-folders" value={draft.category ?? ""} maxLength={80} placeholder="Studio wiki" disabled={Boolean(busy)} onChange={(e) => updateDocument("category", e.target.value)} />
+                <datalist id="document-folders">{folders.map((name) => <option key={name} value={name} />)}</datalist>
+              </label>
               <div className="editor-bar">
                 <div className="editor-modes" role="tablist" aria-label="Document editor mode">
                   {["Write", "Preview"].map((mode) => <button role="tab" key={mode} aria-selected={editorMode === mode} onClick={() => setEditorMode(mode)}>{mode}</button>)}

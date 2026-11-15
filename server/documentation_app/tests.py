@@ -126,6 +126,21 @@ class WorkspaceTests(TestCase):
         self.login(self.admin)
         self.assertEqual(self.client.delete(url).status_code, 204)
 
+    def test_document_folder_can_be_changed_by_any_member_but_not_blanked(self):
+        document = Document.objects.create(title='Lore', created_by=self.artist)
+        url = reverse('workspace_document', kwargs={'pk': document.id})
+        self.login(self.teammate)
+        response = self.client.patch(url, {'category': '  World building  ', 'version': 1}, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['category'], 'World building')
+        document.refresh_from_db()
+        self.assertEqual((document.category, document.version), ('World building', 2))
+        for bad in ['', '   ', 'x' * 81]:
+            with self.subTest(category=bad):
+                self.assertEqual(self.client.patch(url, {'category': bad, 'version': 2}, format='json').status_code, 400)
+        document.refresh_from_db()
+        self.assertEqual((document.category, document.version), ('World building', 2))
+
     def test_task_assignee_and_edit_permissions(self):
         response = self.client.post(reverse('workspace_tasks'), {'title': 'Paint character', 'priority': 'High'}, format='json')
         self.assertEqual(response.status_code, 201)
