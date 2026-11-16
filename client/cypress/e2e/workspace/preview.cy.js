@@ -66,6 +66,54 @@ describe("Studio workspace preview", () => {
     cy.contains("button", "New task").should("have.focus");
   });
 
+  it("formats text with the toolbar and keyboard shortcuts", () => {
+    const editor = '[aria-label="Document content"]';
+    const tool = (name) => cy.get('[role="toolbar"][aria-label="Formatting"]').find(`[aria-label="${name}"]`);
+    cy.contains("button", "New page").click();
+    cy.get(editor).type("hello world");
+    cy.get(editor).then(($el) => $el[0].setSelectionRange(6, 11));
+    tool("Bold").click();
+    cy.get(editor).should("have.value", "hello **world**");
+    tool("Bold").click();
+    cy.get(editor).should("have.value", "hello world");
+    cy.get(editor).clear().type("first{enter}second{selectall}");
+    tool("Bulleted list").click();
+    cy.get(editor).should("have.value", "- first\n- second");
+    tool("Numbered list").click();
+    cy.get(editor).should("have.value", "1. first\n2. second");
+    cy.get(editor).clear().type("note{selectall}{meta}b");
+    cy.get(editor).should("have.value", "**note**");
+    // The demo has no server, so it offers no image upload.
+    tool("Insert image").should("not.exist");
+    cy.contains('[role="tab"]', "Preview").click();
+    cy.get(".markdown-preview strong").should("have.text", "note");
+  });
+
+  it("moves a page into a folder and groups, filters and sorts the Documents page", () => {
+    cy.contains("button", "New page").click();
+    cy.get('[aria-label="Document title"]').clear().type("Boss fight notes");
+    // Typing into an input with a <datalist> opens a native dropdown that crashes Cypress's
+    // Electron browser, so set the value the way React expects instead of typing it.
+    cy.get('[aria-label="Folder name"]').then(($input) => {
+      const input = $input[0];
+      const setValue = Object.getOwnPropertyDescriptor(input.ownerDocument.defaultView.HTMLInputElement.prototype, "value").set;
+      setValue.call(input, "Combat design");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    cy.contains("button", "Documents").click();
+    cy.get('[aria-label="Folder Combat design"]').should("contain", "Boss fight notes");
+    cy.get('[aria-label="Folder Getting started"]').should("contain", "Welcome to Mystic Die");
+    cy.get('[aria-label="Folder"]').select("Combat design");
+    cy.get(".document-folder").should("have.length", 1);
+    cy.get(".document-card").should("have.length", 1);
+    cy.get('[aria-label="Folder"]').select("All folders");
+    cy.get('[aria-label="Sort documents"]').select("Title A–Z");
+    cy.get('[aria-label="Folder Studio wiki"] .document-card h3').then(($titles) => {
+      expect([...$titles].map((title) => title.textContent)).to.deep.equal(["Team onboarding", "Weekly studio notes"]);
+    });
+    cy.contains(".nav-label", "RECENT PAGES").should("be.visible");
+  });
+
   it("keeps navigation and content accessible on a narrow screen", () => {
     cy.viewport(390, 844);
     cy.contains("h1", "Home").should("be.visible");

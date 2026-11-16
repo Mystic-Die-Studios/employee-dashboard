@@ -1,8 +1,11 @@
+from pathlib import PurePath
+
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import F, Prefetch
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
+from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -13,9 +16,9 @@ from rest_framework.views import APIView
 
 from user_app.auth_utils import CookieAuthentication
 from .github_service import sync_review
-from .models import ArtReview, Document, ReviewFeedback, Task
+from .models import ArtReview, Document, DocumentImage, ReviewFeedback, Task
 from .serializers import (
-    DocumentSerializer, MemberSerializer, ReviewFeedbackSerializer,
+    DocumentImageUploadSerializer, DocumentSerializer, MemberSerializer, ReviewFeedbackSerializer,
     ReviewSerializer, ReviewUploadSerializer, TaskSerializer, is_reviewer,
 )
 
@@ -93,6 +96,62 @@ class DocumentView(WorkspaceAPIView):
             raise PermissionDenied('Only the page creator or an admin can delete it.')
         document.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class DocumentImagesView(WorkspaceAPIView):
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        serializer = DocumentImageUploadSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        upload = serializer.validated_data['file']
+        image = serializer.save(uploaded_by=request.user, file_name=upload.name, file_size=upload.size)
+        return Response({
+            'id': str(image.id),
+            'url': reverse('workspace_document_image', kwargs={'pk': image.id}),
+            'file_name': image.file_name,
+            'file_size': image.file_size,
+            'document': str(image.document_id) if image.document_id else None,
+        }, status=status.HTTP_201_CREATED)
+
+
+# Fixed by the stored file's extension, which upload validation limits to these.
+WIKI_IMAGE_CONTENT_TYPES = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.webp': 'image/webp',
+    '.gif': 'image/gif',
+}
+
+
+class DocumentImageView(WorkspaceAPIView):
+    # A stored image never changes (random name, no edits), so the browser may keep it.
+    # "private" keeps it out of shared proxies; errors keep the parent's no-store.
+    CACHE_SECONDS = 24 * 60 * 60
+
+    def finalize_response(self, request, response, *args, **kwargs):
+        response = super().finalize_response(request, response, *args, **kwargs)
+        if response.status_code == 200:
+            response['Cache-Control'] = f'private, max-age={self.CACHE_SECONDS}'
+        return response
+
+    def get(self, request, pk):
+        image = get_object_or_404(DocumentImage, pk=pk)
+        content_type = WIKI_IMAGE_CONTENT_TYPES.get(PurePath(image.file.name).suffix.lower())
+        if content_type is None:
+            raise Http404('The image is unavailable.')
+        try:
+            # Inline so <img> tags render it; the browser never guesses the type.
+            response = FileResponse(image.file.open('rb'), filename=image.file_name, content_type=content_type)
+        except (FileNotFoundError, OSError):
+            raise Http404('The image is unavailable.')
+        response['X-Content-Type-Options'] = 'nosniff'
+        # If the URL is opened directly, nothing inside the file can run or load anything.
+        response['Content-Security-Policy'] = "default-src 'none'; sandbox"
+        # same-site, not same-origin: the Vite dev server (localhost:5173) loads from Django (localhost:8000).
+        response['Cross-Origin-Resource-Policy'] = 'same-site'
+        return response
 
 
 class TasksView(WorkspaceAPIView):

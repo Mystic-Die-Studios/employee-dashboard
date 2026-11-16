@@ -36,11 +36,11 @@ function FileForm({ preview, onClose, onCreated }) {
     const form = new FormData(event.currentTarget);
     const file = form.get("file");
     if (!file?.size) {
-      setError("Choose a non-empty file to submit for review.");
+      setError("The file is empty.");
       return;
     }
     if (file.size > 50 * 1024 * 1024) {
-      setError("This file is too large. Upload a file under 50 MB.");
+      setError("The file must be under 50 MB.");
       return;
     }
     const extension = `.${file.name.split(".").pop().toLowerCase()}`;
@@ -79,7 +79,7 @@ function FileForm({ preview, onClose, onCreated }) {
       onCreated(review);
       onClose();
     } catch (failure) {
-      setError(workspaceError(failure, "The upload failed. Your form is still here; try again."));
+      setError(workspaceError(failure, "Upload failed. Try again."));
     } finally {
       setBusy(false);
     }
@@ -91,14 +91,14 @@ function FileForm({ preview, onClose, onCreated }) {
         <h2 id="review-form-title">Share your work.</h2>
         <button onClick={onClose} disabled={busy} aria-label="Close review form">✕</button>
       </div>
-      <p>{preview ? "Demo: only the filename and ticket details are saved in this browser. The file is not uploaded." : "Upload an artifact to create a private studio review ticket."}</p>
+      {preview && <p>Demo: the file is not uploaded.</p>}
       <form onSubmit={submit}>
         <fieldset disabled={busy}>
           <label>Review title<input name="title" autoFocus required maxLength={160} placeholder="What would you like reviewed?" /></label>
           <label>Project<input name="project" required maxLength={120} placeholder="Project Reconnection" /></label>
-          <label>Description<textarea name="description" maxLength={20000} placeholder="Context, goals, and what feedback would help. Markdown supported." /></label>
+          <label>Description<textarea name="description" maxLength={20000} placeholder="What feedback would help? Markdown supported." /></label>
           <label>Artifact file<input type="file" name="file" required accept={acceptedFiles} /></label>
-          <p className="form-hint">Images, PDF, Blender, FBX, OBJ, PSD, Krita, ZIP, MP4, or WAV · Up to 50 MB. Files are available to signed-in studio members.</p>
+          <p className="form-hint">Images, PDF, Blender, FBX, OBJ, PSD, Krita, ZIP, MP4, or WAV · Up to 50 MB</p>
         </fieldset>
         {error && <p className="form-error" role="alert">{error}</p>}
         <div className="modal-actions">
@@ -129,7 +129,7 @@ function ReviewDetail({ review, preview, onUpdate, onBack }) {
       setBody("");
       setDecision("comment");
     } catch (failure) {
-      setError(workspaceError(failure, "Feedback could not be saved. Your comment is still here."));
+      setError(workspaceError(failure, "Feedback was not saved. Try again."));
     } finally { setBusy(""); }
   }
 
@@ -148,7 +148,7 @@ function ReviewDetail({ review, preview, onUpdate, onBack }) {
       const updated = await syncReview(review.id);
       onUpdate(updated);
     } catch (failure) {
-      setError(workspaceError(failure, "GitHub could not be reached. Your studio ticket is saved."));
+      setError(workspaceError(failure, "Could not reach GitHub. Your review is saved."));
     } finally { setBusy(""); }
   }
 
@@ -164,12 +164,12 @@ function ReviewDetail({ review, preview, onUpdate, onBack }) {
       <p className="review-byline">Submitted by {review.author?.github_username || "Studio member"}{review.created_at ? ` · ${new Date(review.created_at).toLocaleDateString()}` : ""}</p>
       {review.description && <MarkdownPreview>{review.description}</MarkdownPreview>}
       <div className="review-artifact">
-        <div><strong>{review.file_name}</strong><small>{((review.file_size || 0) / (1024 * 1024)).toFixed(2)} MB · Private studio artifact</small></div>
+        <div><strong>{review.file_name}</strong><small>{((review.file_size || 0) / (1024 * 1024)).toFixed(2)} MB</small></div>
         {preview ? <span className="form-hint">Demo file · Download unavailable</span> : <button className="secondary-button" onClick={download} disabled={Boolean(busy)}>{busy === "download" ? "Downloading…" : "Download artifact"}</button>}
       </div>
       <div className="review-github">
         {issueUrl && <a href={issueUrl} target="_blank" rel="noreferrer noopener">View GitHub issue ↗</a>}
-        {review.github_sync_status === "failed" ? <p>GitHub issue sync failed. Your studio review is saved.</p> : !issueUrl && <p>GitHub connection not configured. Your studio review is saved.</p>}
+        {review.github_sync_status === "failed" ? <p>GitHub sync failed. Your review is saved.</p> : !issueUrl && <p>Not linked to GitHub.</p>}
         {!preview && review.can_sync && (review.github_sync_status === "failed" || !issueUrl) && <button className="secondary-button" onClick={connectGithub} disabled={Boolean(busy)}>{busy === "github" ? "Connecting…" : "Retry GitHub sync"}</button>}
       </div>
       <div className="section-heading"><h3>Feedback & review history</h3><span className="toolbar-count">{review.feedback?.length || 0}</span></div>
@@ -179,11 +179,11 @@ function ReviewDetail({ review, preview, onUpdate, onBack }) {
           <MarkdownPreview>{entry.body}</MarkdownPreview>
         </li>)}
       </ol>
-      {!review.feedback?.length && <p className="form-hint">No feedback yet. Start the conversation below.</p>}
+      {!review.feedback?.length && <p className="form-hint">No feedback yet.</p>}
       <form className="review-feedback" onSubmit={feedback}>
         <label>Feedback<textarea aria-label="Review feedback" required maxLength={20000} value={body} onChange={(event) => setBody(event.target.value)} placeholder="Share specific, constructive feedback…" disabled={busy === "feedback"} /></label>
         {review.can_review && !preview && <label>Review decision<select aria-label="Review decision" value={decision} onChange={(event) => setDecision(event.target.value)} disabled={Boolean(busy)}><option value="comment">Comment only</option><option value="changes_requested">Request changes</option><option value="approved">Approve artwork</option></select></label>}
-        {!review.can_review && <p className="form-hint">Studio members can comment. Review leads can approve or request changes.</p>}
+        {!review.can_review && <p className="form-hint">Only review leads can approve or request changes.</p>}
         {error && <p className="form-error" role="alert">{error}</p>}
         <button className="primary-button" disabled={Boolean(busy) || !body.trim()}>{busy === "feedback" ? "Saving feedback…" : "Save feedback"}</button>
       </form>
@@ -226,7 +226,7 @@ export default function Reviews({ reviews, selectedId, onSelect, onUpdate, previ
         <div><span className="eyebrow">{review.ticket}</span><span className={`review-status ${review.status}`}>{statusNames[review.status] || review.status}</span></div>
         <h3>{review.title}</h3><p>{review.project}</p><span className="review-filename">{review.file_name}</span><small>{review.author?.github_username || "Studio member"} · {review.feedback?.length || 0} comments</small>
       </button>)}
-      {!filtered.length && <p className="empty-state">No reviews yet. Submit an artifact to create a ticket and collect feedback.</p>}
+      {!filtered.length && <p className="empty-state">No reviews yet.</p>}
     </div>}
     {showForm && <FileForm preview={preview} onClose={onCloseForm} onCreated={(review) => { update(review); onSelect(review.id); }} />}
   </>;

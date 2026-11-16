@@ -7,6 +7,9 @@ import {
   loadWorkspace,
   saveDocument,
   saveTask,
+  uploadDocumentImage,
+  WIKI_IMAGE_ACCEPT,
+  WIKI_IMAGE_MAX_BYTES,
   workspaceError,
 } from "../api/workspace";
 import MarkdownPreview from "./Markdown";
@@ -20,7 +23,7 @@ const initialDocuments = [
     category: "Getting started",
     icon: "✦",
     updated: "Just now",
-    body: "# Studio Workspace\n\n## Navigation\n- Projects: view tasks by status.\n- Documents: create and edit Markdown pages.\n- My tasks: view tasks assigned to you.\n- Reviews: upload artwork and read feedback.\n- Team: view workspace members.",
+    body: "# Welcome\n\n- Projects: tasks by status\n- Documents: the team wiki\n- My tasks: tasks assigned to you\n- Reviews: art feedback\n- Team: who is here",
   },
   {
     id: "direction",
@@ -28,7 +31,7 @@ const initialDocuments = [
     category: "Project Reconnection",
     icon: "◈",
     updated: "Today",
-    body: "# Project Reconnection\n\nUse this document to collect visual references, narrative ideas, and creative decisions for the project.",
+    body: "# Project Reconnection\n\nVisual references, story ideas, and creative decisions.",
   },
   {
     id: "onboarding",
@@ -36,7 +39,7 @@ const initialDocuments = [
     category: "Studio wiki",
     icon: "☀",
     updated: "Yesterday",
-    body: "WELCOME TO THE TEAM\n\nYour first week\n• Meet your teammates.\n• Get access to the project repository.\n• Read the creative direction.\n• Pick a small first task with your lead.\n\nQuestions are welcome. Leave a note here and bring it to our next team check-in.",
+    body: "# Your first week\n\n- Meet your teammates.\n- Get access to the project repository.\n- Read the creative direction.\n- Pick a small first task with your lead.",
   },
   {
     id: "notes",
@@ -44,7 +47,7 @@ const initialDocuments = [
     category: "Studio wiki",
     icon: "≋",
     updated: "Yesterday",
-    body: "STUDIO CHECK-IN\n\nWhat moved forward?\n\nWhat did we learn?\n\nWhere do we need a hand?\n\nNext steps\nCapture decisions and turn follow-ups into tasks on the project board.",
+    body: "# Weekly check-in\n\n## What moved forward?\n\n## What did we learn?\n\n## Where do we need a hand?\n\n## Next steps",
   },
 ];
 const initialTasks = [
@@ -114,6 +117,157 @@ const previewReviews = [{
   can_sync: false,
 }];
 
+// "Map Sketch.png" -> "![Map Sketch](url)". Brackets and backslashes would break the alt text.
+function imageMarkdown(fileName, url) {
+  const alt = fileName.replace(/\.[^.]+$/, "").replace(/[[\]\\]/g, "").trim() || "image";
+  return `![${alt}](${url})`;
+}
+
+// Card preview: the first two lines of a page as plain text. Images are dropped, links keep
+// their text, and Markdown symbols (headings, lists, checkboxes, quotes, emphasis, code) go.
+function documentExcerpt(body) {
+  return (body || "")
+    .replace(/```[\s\S]*?(```|$)/g, "\n")
+    .split("\n")
+    .map((line) => line
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+      .replace(/^\s*(#{1,6}\s+|>\s?|[-*+]\s+\[[ xX]\]\s+|[-*+]\s+|\d+[.)]\s+)/, "")
+      .replace(/^\s*([-*_]\s*){3,}$/, "")
+      .replace(/^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/, "")
+      .replace(/(\*\*|__|~~|`)/g, "")
+      .replace(/(^|[^\w*])\*(?!\s)([^*]+?)\*(?=[^\w*]|$)/g, "$1$2")
+      .replace(/(^|\W)_(?!\s)([^_]+?)_(?=\W|$)/g, "$1$2")
+      .replace(/\|/g, " ")
+      .replace(/\s+/g, " ")
+      .trim())
+    .filter(Boolean)
+    .slice(0, 2)
+    .join(" · ")
+    .slice(0, 100);
+}
+
+// Line-based formats: the marker each one adds, and the pattern that recognizes it.
+const LINE_FORMATS = {
+  heading: { prefix: () => "## ", pattern: /^#{1,6}\s+/ },
+  quote: { prefix: () => "> ", pattern: /^>\s?/ },
+  bullets: { prefix: () => "- ", pattern: /^[-*+]\s+(?!\[[ xX]\]\s)/, list: true },
+  numbers: { prefix: (i) => `${i + 1}. `, pattern: /^\d+[.)]\s+/, list: true },
+  checklist: { prefix: () => "- [ ] ", pattern: /^[-*+]\s+\[[ xX]\]\s+/, list: true },
+};
+const ANY_LIST_MARKER = /^([-*+]\s+\[[ xX]\]\s+|[-*+]\s+|\d+[.)]\s+)/;
+const WRAP_FORMATS = { bold: ["**", "bold text"], italic: ["_", "italic text"], code: ["`", "code"] };
+
+// Works out one toolbar edit: replace value[from, to) with `text`, then select
+// [selectStart, selectEnd). Pure, so it can be tested without a browser.
+function formatMarkdown(action, value, start, end) {
+  const selected = value.slice(start, end);
+  if (action === "code" && selected.includes("\n")) {
+    const block = `\`\`\`\n${selected.replace(/\n$/, "")}\n\`\`\``;
+    return padBlock(value, start, end, block, 4, 4 + selected.replace(/\n$/, "").length);
+  }
+  if (WRAP_FORMATS[action]) {
+    const [marker, placeholder] = WRAP_FORMATS[action];
+    const m = marker.length;
+    // Keep markers next to the words: "**word** " not "**word **".
+    const lead = selected.length - selected.trimStart().length;
+    const trail = selected.length - selected.trimEnd().length;
+    const from = selected.trim() ? start + lead : start;
+    const to = selected.trim() ? end - trail : end;
+    const inner = value.slice(from, to);
+    if (inner.length >= 2 * m && inner.startsWith(marker) && inner.endsWith(marker)) {
+      const text = inner.slice(m, -m);
+      return { from, to, text, selectStart: from, selectEnd: from + text.length };
+    }
+    if (from >= m && value.slice(from - m, from) === marker && value.slice(to, to + m) === marker) {
+      return { from: from - m, to: to + m, text: inner, selectStart: from - m, selectEnd: from - m + inner.length };
+    }
+    const text = inner || placeholder;
+    return { from, to, text: `${marker}${text}${marker}`, selectStart: from + m, selectEnd: from + m + text.length };
+  }
+  if (action === "link") {
+    if (/^https?:\/\/\S+$/.test(selected.trim())) {
+      return { from: start, to: end, text: `[link text](${selected.trim()})`, selectStart: start + 1, selectEnd: start + 10 };
+    }
+    const label = selected || "link text";
+    const text = `[${label}](https://)`;
+    return { from: start, to: end, text, selectStart: start + label.length + 3, selectEnd: start + text.length - 1 };
+  }
+  const format = LINE_FORMATS[action];
+  if (!format) return null;
+  // Whole lines touched by the selection; a selection ending at a line start skips that line.
+  const lastChar = end > start && value[end - 1] === "\n" ? end - 1 : end;
+  const from = value.lastIndexOf("\n", start - 1) + 1;
+  const lineEnd = value.indexOf("\n", lastChar);
+  const to = lineEnd === -1 ? value.length : lineEnd;
+  const lines = value.slice(from, to).split("\n");
+  const filled = lines.filter((line) => line.trim());
+  const remove = filled.length > 0 && filled.every((line) => format.pattern.test(line));
+  let count = 0;
+  const changed = lines.map((line) => {
+    if (remove) return line.replace(format.pattern, "");
+    if (!line.trim() && lines.length > 1) return line;
+    const bare = format.list ? line.replace(ANY_LIST_MARKER, "") : line.replace(format.pattern, "");
+    return format.prefix(count++) + bare;
+  });
+  const text = changed.join("\n");
+  if (start === end && lines.length === 1) {
+    const cursor = Math.max(from, start + (changed[0].length - lines[0].length));
+    return { from, to, text, selectStart: cursor, selectEnd: cursor };
+  }
+  return { from, to, text, selectStart: from, selectEnd: from + text.length };
+}
+
+// Puts block content (images, code blocks) on its own lines, adding line breaks only where needed.
+function padBlock(value, start, end, block, innerStart = block.length, innerEnd = block.length) {
+  const before = value.slice(0, start);
+  const after = value.slice(end);
+  const lead = before && !before.endsWith("\n") ? "\n" : "";
+  const trail = after && !after.startsWith("\n") ? "\n" : "";
+  return { from: start, to: end, text: `${lead}${block}${trail}`, selectStart: start + lead.length + innerStart, selectEnd: start + lead.length + innerEnd };
+}
+
+const MOD_KEY = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
+const TOOLBAR = [
+  ["bold", "Bold", `${MOD_KEY}B`],
+  ["italic", "Italic", `${MOD_KEY}I`],
+  ["heading", "Heading"],
+  ["link", "Link", `${MOD_KEY}K`],
+  ["bullets", "Bulleted list"],
+  ["numbers", "Numbered list"],
+  ["checklist", "Checklist"],
+  ["code", "Code"],
+  ["quote", "Quote"],
+];
+const SHORTCUTS = { b: "bold", i: "italic", k: "link" };
+
+// Pages created outside the editor get the model's default icon name ("file-text"),
+// which would show as text. Only show real symbols (one or two characters).
+function pageIcon(icon) {
+  return icon && Array.from(icon).length <= 2 ? icon : "▤";
+}
+
+// Guards against dropping a whole folder of files by accident.
+const MAX_IMAGES_AT_ONCE = 10;
+
+const PASTED_IMAGE_EXTENSIONS = { "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif" };
+
+// Browsers name pasted screenshots "image.png" (or leave them unnamed), which would make
+// the alt text "image" or fail the extension check. Name them from their image type.
+function renamePastedImage(file) {
+  const generic = !file.name || /^image(\.[a-z0-9]+)?$/i.test(file.name);
+  const extension = PASTED_IMAGE_EXTENSIONS[file.type];
+  return generic && extension ? new File([file], `Pasted image${extension}`, { type: file.type, lastModified: file.lastModified }) : file;
+}
+
+// Quick browser-side check; the server re-checks every upload.
+function imageFileProblem(file) {
+  const extension = file.name.includes(".") ? `.${file.name.split(".").pop().toLowerCase()}` : "";
+  if (!WIKI_IMAGE_ACCEPT.split(",").includes(extension)) return "Upload an image: PNG, JPEG, WebP, or GIF.";
+  if (file.size > WIKI_IMAGE_MAX_BYTES) return `The image exceeds the ${WIKI_IMAGE_MAX_BYTES / (1024 * 1024)} MB limit.`;
+  return "";
+}
+
 function Icon({ name, size = 20 }) {
   const paths = {
     home: (
@@ -150,6 +304,22 @@ function Icon({ name, size = 20 }) {
       <>
         <circle cx="10" cy="10" r="6" />
         <path d="m15 15 6 6" />
+      </>
+    ),
+    bold: <path d="M7 5h6a3.5 3.5 0 0 1 0 7H7Zm0 7h7a3.5 3.5 0 0 1 0 7H7Z" />,
+    italic: <path d="M10 5h8M6 19h8M14 5l-4 14" />,
+    heading: <path d="M6 5v14M17 5v14M6 12h11" />,
+    link: <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />,
+    bullets: <path d="M10 6h10M10 12h10M10 18h10M4.5 6h.01M4.5 12h.01M4.5 18h.01" />,
+    numbers: <path d="M10 6h10M10 12h10M10 18h10M4 5l1.5-1v5M3.5 14.5a1.5 1.5 0 0 1 3 .5L3.5 19h3" />,
+    checklist: <path d="m3.5 6.5 1.5 1.5 3-3M3.5 16.5l1.5 1.5 3-3M11 7h9M11 17h9" />,
+    code: <path d="m8 7-5 5 5 5M16 7l5 5-5 5" />,
+    quote: <path d="M5 5v14M9 8h10M9 12h10M9 16h7" />,
+    image: (
+      <>
+        <rect x="3" y="5" width="18" height="14" rx="2" />
+        <path d="m3 16 5-5 4 4 2.5-2.5L21 18" />
+        <circle cx="15.5" cy="9.5" r="1.5" />
       </>
     ),
     arrow: <path d="M5 12h14m-6-6 6 6-6 6" />,
@@ -300,7 +470,15 @@ export default function Workspace({ user, onLogout, preview = false }) {
   const [taskError, setTaskError] = useState("");
   const [reviewForm, setReviewForm] = useState(false);
   const storageWarning = useRef(null);
+  const bodyEditor = useRef(null);
+  const pendingCursor = useRef(null);
+  const pendingImages = useRef(null);
+  const imagePicker = useRef(null);
+  const openPage = useRef(null);
+  const [imageDropTarget, setImageDropTarget] = useState(false);
   const [query, setQuery] = useState("");
+  const [folderFilter, setFolderFilter] = useState("");
+  const [documentSort, setDocumentSort] = useState("updated");
   const [menuOpen, setMenuOpen] = useState(false);
   const [taskForm, setTaskForm] = useState(false);
   const [notice, setNotice] = useState("");
@@ -315,13 +493,22 @@ export default function Workspace({ user, onLogout, preview = false }) {
       .toLowerCase()
       .includes(query.toLowerCase()),
   );
+  const folders = [...new Set(data.documents.map((d) => d.category).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  // A folder that no longer exists (renamed or emptied) falls back to all folders.
+  const activeFolder = folders.includes(folderFilter) ? folderFilter : "";
+  const byUpdated = (a, b) => (a.updated_at && b.updated_at ? b.updated_at.localeCompare(a.updated_at) : 0);
+  const byTitle = (a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
+  const shownDocuments = filteredDocuments
+    .filter((d) => !activeFolder || d.category === activeFolder)
+    .sort(documentSort === "title" ? byTitle : byUpdated);
+  const folderGroups = [...new Set(shownDocuments.map((d) => d.category))]
+    .sort((a, b) => a.localeCompare(b))
+    .map((name) => [name, shownDocuments.filter((d) => d.category === name)]);
+  const recentDocuments = [...data.documents].sort(byUpdated).slice(0, 3);
   const filteredTasks = data.tasks.filter((t) =>
     `${t.title} ${t.project}`.toLowerCase().includes(query.toLowerCase()),
   );
   const complete = data.tasks.filter((t) => t.status === "Done").length;
-  const progress = data.tasks.length
-    ? Math.round((complete / data.tasks.length) * 100)
-    : 0;
   const projectCount = new Set([...data.tasks.map((task) => task.project), ...data.reviews.map((review) => review.project)].filter(Boolean)).size;
 
   useEffect(() => {
@@ -389,7 +576,7 @@ export default function Workspace({ user, onLogout, preview = false }) {
     if (busy || loading || loadError) return;
     const fields = {
       title: "Untitled document",
-      category: "Studio wiki",
+      category: activeFolder || "Studio wiki",
       icon: "▤",
       body: "",
     };
@@ -415,6 +602,157 @@ export default function Workspace({ user, onLogout, preview = false }) {
       ),
     }));
   }
+  // Applies one edit ({ from, to, text, selectStart, selectEnd }) to the page body.
+  // Uses the browser's own insert command so Cmd/Ctrl+Z can undo it; React picks the
+  // change up through the textarea's normal onChange. If the browser refuses (or the
+  // editor is not open), falls back to a plain state update, which cannot be undone.
+  function applyEdit(edit) {
+    const editor = bodyEditor.current;
+    if (editor && !editor.disabled) {
+      editor.focus();
+      editor.setSelectionRange(edit.from, edit.to);
+      const command = edit.text ? "insertText" : "delete";
+      if (document.execCommand(command, false, edit.text)) {
+        editor.setSelectionRange(edit.selectStart, edit.selectEnd);
+        return;
+      }
+    }
+    const body = editor ? editor.value : draft?.body ?? "";
+    updateDocument("body", body.slice(0, edit.from) + edit.text + body.slice(edit.to));
+    pendingCursor.current = [edit.selectStart, edit.selectEnd];
+  }
+  function formatSelection(action) {
+    const editor = bodyEditor.current;
+    if (!editor || editor.disabled) return;
+    const edit = formatMarkdown(action, editor.value, editor.selectionStart, editor.selectionEnd);
+    if (edit) applyEdit(edit);
+  }
+  function editorShortcut(event) {
+    if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+    const action = SHORTCUTS[event.key.toLowerCase()];
+    if (!action) return;
+    event.preventDefault();
+    formatSelection(action);
+  }
+  // Restores the selection after a fallback state update, once the textarea has re-rendered.
+  useEffect(() => {
+    const editor = bodyEditor.current;
+    if (!pendingCursor.current || !editor || editor.disabled) return;
+    editor.focus();
+    editor.setSelectionRange(...pendingCursor.current);
+    pendingCursor.current = null;
+  });
+  // Uploaded images are inserted once the upload finishes and the editor is enabled again,
+  // at the selection the member had when the upload started, so the insert can be undone.
+  // The insert runs on the next task, not inside this effect: an edit made during an effect
+  // makes React reset the textarea and write it back, which clears the browser's undo history.
+  useEffect(() => {
+    const pending = pendingImages.current;
+    if (!pending || busy) return;
+    pendingImages.current = null;
+    window.setTimeout(() => {
+      const body = bodyEditor.current ? bodyEditor.current.value : draft?.body ?? "";
+      applyEdit(padBlock(body, pending.start, pending.end, pending.markdown));
+    }, 0);
+  });
+  // Tracks the page on screen so a slow upload never lands in a page the member has left.
+  useEffect(() => { openPage.current = selectedId; }, [selectedId]);
+  // Shared by the file picker, paste, and drag-and-drop. Uploads one at a time and
+  // inserts all the Markdown in one go at the cursor, each image on its own line.
+  async function uploadImages(fileList) {
+    const files = Array.from(fileList ?? []);
+    if (!files.length || !selected || busy) return;
+    const named = (file, message) => files.length > 1 ? `${file.name}: ${message}` : message;
+    if (files.length > MAX_IMAGES_AT_ONCE) {
+      setNotice(`Add up to ${MAX_IMAGES_AT_ONCE} images at a time.`);
+      return;
+    }
+    // Check every file first, so nothing uploads when one of them is unsupported.
+    for (const file of files) {
+      const problem = imageFileProblem(file);
+      if (problem) { setNotice(named(file, problem)); return; }
+    }
+    const pageId = selected.id;
+    const uploaded = [];
+    let failureNotice = "";
+    const editor = bodyEditor.current;
+    const bodyLength = (editor ? editor.value : draft?.body ?? "").length;
+    const selection = editor ? [editor.selectionStart, editor.selectionEnd] : [bodyLength, bodyLength];
+    setBusy("upload-image");
+    setNotice("");
+    try {
+      for (const file of files) {
+        try {
+          const image = await uploadDocumentImage(file, pageId);
+          uploaded.push(imageMarkdown(image.file_name, image.url));
+        } catch (failure) {
+          // Show the server's file message without the "file: " field prefix.
+          const fileError = failure.response?.data?.file?.[0];
+          failureNotice = named(file, typeof fileError === "string" ? fileError : workspaceError(failure, "The image could not be uploaded. Try again."));
+          break; // Keep the images that already uploaded; skip the rest.
+        }
+      }
+      const markdown = uploaded.join("\n");
+      if (markdown && openPage.current === pageId) pendingImages.current = { markdown, start: selection[0], end: selection[1] };
+      else if (markdown) {
+        const left = `${uploaded.length > 1 ? "The images were" : "The image was"} uploaded, but you left the page first. Paste this where you want it: ${markdown}`;
+        failureNotice = failureNotice ? `${left} ${failureNotice}` : left;
+      }
+      setNotice(failureNotice);
+    } finally {
+      setBusy("");
+    }
+  }
+  function pickImages(event) {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = ""; // Allow picking the same file again later.
+    uploadImages(files);
+  }
+  function pasteImages(event) {
+    if (preview || conflicts[selected?.id]) return;
+    const clipboard = event.clipboardData;
+    // Copies from spreadsheets and Word carry the text plus a picture of it: keep the
+    // normal text paste. Screenshots and "Copy image" carry no plain text.
+    if (!clipboard || clipboard.types.includes("text/plain")) return;
+    const images = Array.from(clipboard.files).filter((file) => file.type.startsWith("image/"));
+    if (!images.length) return;
+    event.preventDefault();
+    uploadImages(images.map(renamePastedImage));
+  }
+  // Drag and drop: same rules as the button. Text dragged within the editor has no
+  // "Files" type, so it keeps the browser's normal behavior.
+  const canDropImages = Boolean(selected) && !preview && editorMode === "Write" && !busy && !conflicts[selected?.id];
+  const draggingFiles = (event) => Array.from(event.dataTransfer?.types ?? []).includes("Files");
+  function dragImagesOver(event) {
+    if (!draggingFiles(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = canDropImages ? "copy" : "none";
+    if (canDropImages !== imageDropTarget) setImageDropTarget(canDropImages);
+  }
+  function dropImages(event) {
+    if (!draggingFiles(event)) return;
+    event.preventDefault();
+    setImageDropTarget(false);
+    // Browsers do not report where in a textarea a file was dropped, so images go
+    // where the cursor was before dragging.
+    if (canDropImages) uploadImages(event.dataTransfer.files);
+  }
+  // While a page is open, a file dropped anywhere outside the editor would make the
+  // browser open that file and leave the page, losing unsaved edits. Refuse those drops.
+  useEffect(() => {
+    if (!selectedId) return;
+    const refuseFileDrop = (event) => {
+      if (event.defaultPrevented || !Array.from(event.dataTransfer?.types ?? []).includes("Files")) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "none";
+    };
+    window.addEventListener("dragover", refuseFileDrop);
+    window.addEventListener("drop", refuseFileDrop);
+    return () => {
+      window.removeEventListener("dragover", refuseFileDrop);
+      window.removeEventListener("drop", refuseFileDrop);
+    };
+  }, [selectedId]);
   async function changeStatus(id, status) {
     if (busy) return;
     setBusy(`task:${id}`);
@@ -447,14 +785,13 @@ export default function Workspace({ user, onLogout, preview = false }) {
     setBusy("save-document");
     setNotice("");
     try {
-      const saved = await saveDocument(selected.id, { title: draft.title.trim(), body: draft.body, version: draft.version });
+      const saved = await saveDocument(selected.id, { title: draft.title.trim(), category: (draft.category ?? "").trim() || "Studio wiki", body: draft.body, version: draft.version });
       setData((current) => ({ ...current, documents: current.documents.map((doc) => doc.id === saved.id ? saved : doc) }));
       setDrafts((current) => { const next = { ...current }; delete next[saved.id]; return next; });
-      setNotice("Page saved to the studio workspace.");
     } catch (failure) {
       if (failure.response?.status === 409) {
         setConflicts((current) => ({ ...current, [selected.id]: { latest: null } }));
-        setNotice("Another member changed this page. Your draft is safe. Compare with the saved page before saving again.");
+        setNotice("Another member changed this page. Your draft is safe; compare before saving.");
       } else setNotice(workspaceError(failure, "Your page could not be saved. Your draft is still here; try again."));
     } finally { setBusy(""); }
   }
@@ -474,11 +811,11 @@ export default function Workspace({ user, onLogout, preview = false }) {
     setData((current) => ({ ...current, documents: current.documents.map((doc) => doc.id === latest.id ? latest : doc) }));
     setDrafts((current) => ({ ...current, [selected.id]: { ...current[selected.id], version: latest.version } }));
     setConflicts((current) => { const next = { ...current }; delete next[selected.id]; return next; });
-    setNotice("Review and merge your draft, then Save page to replace the latest saved content.");
+    setNotice("Merge your changes, then save to replace the latest version.");
   }
   async function removePage() {
     if (!selected || busy) return;
-    if (!window.confirm(`Delete “${selected.title}”? This removes the shared page and its contents from the studio workspace.`)) return;
+    if (!window.confirm(`Delete “${selected.title}”? This can't be undone.`)) return;
     setBusy("delete-document");
     try {
       await deleteDocument(selected.id);
@@ -506,35 +843,40 @@ export default function Workspace({ user, onLogout, preview = false }) {
     } finally { setBusy(""); }
   }
 
+  const documentCard = (doc) => (
+    <button
+      className="document-card"
+      key={doc.id}
+      onClick={() => openDocument(doc.id)}
+    >
+      <span className="document-symbol">{pageIcon(doc.icon)}</span>
+      <span className="eyebrow">{doc.category}</span>
+      <h3>{doc.title}</h3>
+      <p>{documentExcerpt(doc.body)}</p>
+      <span className="document-footer">
+        Edited {doc.updated.toLowerCase()} <Icon name="arrow" size={16} />
+      </span>
+    </button>
+  );
+  const noDocuments = <p className="empty-state">No documents found.</p>;
   const documentList = (
     <div className="document-grid">
-      {filteredDocuments.map((doc) => (
-        <button
-          className="document-card"
-          key={doc.id}
-          onClick={() => openDocument(doc.id)}
-        >
-          <span className="document-symbol">{doc.icon}</span>
-          <span className="eyebrow">{doc.category}</span>
-          <h3>{doc.title}</h3>
-          <p>
-            {doc.body
-              .split("\n")
-              .filter(Boolean)
-              .slice(0, 2)
-              .join(" · ")
-              .slice(0, 100)}
-          </p>
-          <span className="document-footer">
-            Edited {doc.updated.toLowerCase()} <Icon name="arrow" size={16} />
-          </span>
-        </button>
+      {[...filteredDocuments].sort(byUpdated).map(documentCard)}
+      {!filteredDocuments.length && noDocuments}
+    </div>
+  );
+  const documentFolders = (
+    <div className="document-folders">
+      {folderGroups.map(([name, docs]) => (
+        <section className="document-folder" key={name} aria-label={`Folder ${name}`}>
+          <div className="section-heading">
+            <h2>{name}</h2>
+            <span className="toolbar-count">{docs.length}</span>
+          </div>
+          <div className="document-grid">{docs.map(documentCard)}</div>
+        </section>
       ))}
-      {!filteredDocuments.length && (
-        <p className="empty-state">
-          No documents found. Try another search or create a page.
-        </p>
-      )}
+      {!shownDocuments.length && noDocuments}
     </div>
   );
 
@@ -557,12 +899,6 @@ export default function Workspace({ user, onLogout, preview = false }) {
             MYSTIC DIE<small>STUDIOS</small>
           </span>
         </a>
-        <div className="workspace-switch">
-          <span className="workspace-avatar">M</span>
-          <span>
-            Mystic Die Studios<small>Studio Workspace</small>
-          </span>
-        </div>
         <p className="nav-label">WORKSPACE</p>
         <nav aria-label="Workspace navigation">
           {[
@@ -594,29 +930,21 @@ export default function Workspace({ user, onLogout, preview = false }) {
           ))}
         </nav>
         <div className="nav-section-heading">
-          <p className="nav-label">PINNED PAGES</p>
+          <p className="nav-label">RECENT PAGES</p>
           <button aria-label="Create document" onClick={newDocument} disabled={Boolean(busy) || loading || Boolean(loadError)}>
             <Icon name="plus" size={16} />
           </button>
         </div>
-        {data.documents.slice(0, 3).map((d) => (
+        {recentDocuments.map((d) => (
           <button
             key={d.id}
             className="pinned-page"
             onClick={() => openDocument(d.id)}
           >
-            <span>{d.icon}</span>
+            <span>{pageIcon(d.icon)}</span>
             {d.title}
           </button>
         ))}
-        <div className="sidebar-note">
-          <span>✧</span>
-          <h4>Markdown pages</h4>
-          <p>Create a page for notes or documentation.</p>
-          <button onClick={newDocument} disabled={Boolean(busy) || loading || Boolean(loadError)}>
-            Create page <Icon name="arrow" size={16} />
-          </button>
-        </div>
         <div className="account">
           <span className="person-avatar">
             {name.slice(0, 2).toUpperCase()}
@@ -656,10 +984,6 @@ export default function Workspace({ user, onLogout, preview = false }) {
             <span>/</span>
             <strong>{selected ? selected.title : view}</strong>
           </div>
-          <span className="studio-status">
-            <span />
-            Studio Workspace
-          </span>
         </header>
         {preview && <div className="preview-banner">
           <span className="preview-dot" />
@@ -680,29 +1004,9 @@ export default function Workspace({ user, onLogout, preview = false }) {
         </div>}
         <main className="workspace-content" data-testid="dashboard-header">
           <div className="page-heading">
-            <div>
-              <p className="eyebrow">
-                MYSTIC DIE STUDIOS / {view.toUpperCase()}
-              </p>
-              <h1>
-                {selected ? "Edit document" : view}
-              </h1>
-              <p className="page-subtitle">
-                {selected
-                  ? "Edit the title and Markdown content. Use Preview to check formatting."
-                  : view === "Home"
-                  ? "View project and task counts, and open documents."
-                  : view === "Projects"
-                    ? "View project tasks by status and create new tasks."
-                    : view === "Documents"
-                      ? "Create, search, and edit Markdown pages."
-                      : view === "My tasks"
-                        ? "View and update tasks assigned to you."
-                        : view === "Reviews"
-                          ? "Upload artwork, collect feedback, and track every review in one place."
-                        : "View workspace members and their roles."}
-              </p>
-            </div>
+            <h1>
+              {selected ? "Edit document" : view}
+            </h1>
             {view !== "Team" && <button
               className="primary-button"
               disabled={Boolean(busy)}
@@ -729,41 +1033,12 @@ export default function Workspace({ user, onLogout, preview = false }) {
           )}
           {view === "Home" && (
             <>
-              <section className="welcome-card">
-                <div className="welcome-copy">
-                  <h2>Studio Workspace</h2>
-                  <p>
-                    Manage project tasks, edit documentation, and review artwork.
-                  </p>
-                  <button onClick={() => go("Projects")}>
-                    Open project board <Icon name="arrow" size={18} />
-                  </button>
-                </div>
-                <div className="hero-art" aria-hidden="true">
-                  <div className="die-orbit die-orbit-one" />
-                  <div className="die-orbit die-orbit-two" />
-                  <div className="die-glow" />
-                  <img className="hero-die" src="/studio-die.svg" alt="" />
-                  <span className="die-spark die-spark-one">✦</span>
-                  <span className="die-spark die-spark-two">✧</span>
-                </div>
-              </section>
               <div className="stats-row">
                 {[
-                  ["project", "Active projects", projectCount, "View project board"],
-                  [
-                    "document",
-                    "Shared documents",
-                    data.documents.length,
-                    "Open documents",
-                  ],
-                  [
-                    "task",
-                    "Open tasks",
-                    data.tasks.length - complete,
-                    "View your tasks",
-                  ],
-                ].map(([icon, label, count, description]) => (
+                  ["project", "Active projects", projectCount],
+                  ["document", "Shared documents", data.documents.length],
+                  ["task", "Open tasks", data.tasks.length - complete],
+                ].map(([icon, label, count]) => (
                   <button
                     className="stat-card"
                     key={label}
@@ -783,7 +1058,6 @@ export default function Workspace({ user, onLogout, preview = false }) {
                     <div>
                       <span>{label}</span>
                       <strong>{count}</strong>
-                      <small>{description}</small>
                     </div>
                     <Icon name="arrow" size={17} />
                   </button>
@@ -796,41 +1070,31 @@ export default function Workspace({ user, onLogout, preview = false }) {
                 </button>
               </div>
               {documentList}
-              <section className="project-summary">
-                <span className="project-emblem">◈</span>
-                <div>
-                  <h3>Studio workflow</h3>
-                  <p>Documents, tasks, and art reviews in one shared workspace.</p>
-                </div>
-                <div className="project-progress">
-                  <span>{progress}% of {preview ? "sample " : ""}tasks complete</span>
-                  <progress value={complete} max={data.tasks.length || 1} />
-                </div>
-                <button
-                  className="secondary-button"
-                  onClick={() => go("Projects")}
-                >
-                  Open project <Icon name="arrow" size={16} />
-                </button>
-              </section>
             </>
           )}
 
           {view !== "Home" && view !== "Team" && !selected && !reviewId && (
             <div className="view-toolbar">
               <div className="view-tabs">
-                <span className="selected-tab">
+                {view === "Documents" ? <>
+                  <select aria-label="Folder" value={activeFolder} onChange={(e) => setFolderFilter(e.target.value)}>
+                    <option value="">All folders</option>
+                    {folders.map((name) => <option key={name} value={name}>{name}</option>)}
+                  </select>
+                  <select aria-label="Sort documents" value={documentSort} onChange={(e) => setDocumentSort(e.target.value)}>
+                    <option value="updated">Last updated</option>
+                    <option value="title">Title A–Z</option>
+                  </select>
+                </> : <span className="selected-tab">
                   {view === "Projects"
                     ? "Project board"
-                    : view === "Documents"
-                      ? "Markdown wiki · All documents"
-                      : view === "Reviews"
-                        ? "Review tickets"
-                      : "Assigned to me"}
-                </span>
+                    : view === "Reviews"
+                      ? "Review tickets"
+                    : "Assigned to me"}
+                </span>}
                 <span className="toolbar-count">
                   {view === "Documents"
-                    ? filteredDocuments.length
+                    ? shownDocuments.length
                     : view === "Reviews"
                       ? data.reviews.length
                     : filteredTasks.filter(
@@ -849,17 +1113,17 @@ export default function Workspace({ user, onLogout, preview = false }) {
               </label>
             </div>
           )}
-          {view === "Documents" && !selected && documentList}
+          {view === "Documents" && !selected && documentFolders}
           {selected && (
             <section className="document-editor">
               <div className="editor-toolbar">
                 <button onClick={() => go("Documents")}>
                   ← All documents
                 </button>
-                {preview ? <span ref={storageWarning} role="status">Saved in this browser</span> : <span role="status">{busy === "save-document" ? "Saving page…" : documentDirty ? "Unsaved changes" : "Saved to studio workspace"}</span>}
+                {preview ? <span ref={storageWarning} role="status">Saved in this browser</span> : <span role="status">{busy === "save-document" ? "Saving…" : busy === "upload-image" ? "Uploading image…" : documentDirty ? "Unsaved changes" : "Saved"}</span>}
                 {!preview && <button className="primary-button" onClick={savePage} disabled={!documentDirty || Boolean(busy) || Boolean(conflicts[selected.id])}>Save page</button>}
               </div>
-              <span className="editor-symbol">{selected.icon}</span>
+              <span className="editor-symbol">{pageIcon(selected.icon)}</span>
               <input
                 className="editor-title"
                 aria-label="Document title"
@@ -868,48 +1132,64 @@ export default function Workspace({ user, onLogout, preview = false }) {
                 disabled={Boolean(busy)}
                 onChange={(e) => updateDocument("title", e.target.value)}
               />
-              <span className="editor-category">
-                {selected.category} <span>•</span> Studio document
-              </span>
-              <div className="editor-modes" role="tablist" aria-label="Document editor mode">
-                {["Write", "Preview"].map((mode) => <button role="tab" key={mode} aria-selected={editorMode === mode} onClick={() => setEditorMode(mode)}>{mode}</button>)}
+              <label className="editor-category">
+                Folder
+                <input aria-label="Folder name" list="document-folders" value={draft.category ?? ""} maxLength={80} placeholder="Studio wiki" disabled={Boolean(busy)} onChange={(e) => updateDocument("category", e.target.value)} />
+                <datalist id="document-folders">{folders.map((name) => <option key={name} value={name} />)}</datalist>
+              </label>
+              <div className="editor-bar">
+                <div className="editor-modes" role="tablist" aria-label="Document editor mode">
+                  {["Write", "Preview"].map((mode) => <button role="tab" key={mode} aria-selected={editorMode === mode} onClick={() => setEditorMode(mode)}>{mode}</button>)}
+                </div>
+                {editorMode === "Write" && <div className="format-toolbar" role="toolbar" aria-label="Formatting">
+                  {/* onMouseDown keeps focus and the selection in the editor while clicking. */}
+                  {TOOLBAR.map(([action, label, shortcut]) => (
+                    <button key={action} type="button" aria-label={label} title={shortcut ? `${label} (${shortcut})` : label} onMouseDown={(event) => event.preventDefault()} onClick={() => formatSelection(action)} disabled={Boolean(busy)}>
+                      <Icon name={action} size={16} />
+                    </button>
+                  ))}
+                  {!preview && <>
+                    <input ref={imagePicker} type="file" accept={WIKI_IMAGE_ACCEPT} multiple hidden onChange={pickImages} />
+                    <button type="button" aria-label="Insert image" title="Insert image" onMouseDown={(event) => event.preventDefault()} onClick={() => imagePicker.current?.click()} disabled={Boolean(busy) || Boolean(conflicts[selected.id])}>
+                      <Icon name="image" size={16} />
+                    </button>
+                  </>}
+                </div>}
               </div>
               {editorMode === "Write" ? <textarea
+                ref={bodyEditor}
                 aria-label="Document content"
-                placeholder="Write Markdown: headings, lists, links, tables, and checklists."
+                placeholder="Write in Markdown…"
                 value={draft.body}
                 disabled={Boolean(busy)}
                 onChange={(e) => updateDocument("body", e.target.value)}
-              /> : <MarkdownPreview>{draft.body || "*This page is empty. Switch to Write to add content.*"}</MarkdownPreview>}
+                onPaste={pasteImages}
+                onKeyDown={editorShortcut}
+                onDragOver={dragImagesOver}
+                onDragLeave={() => setImageDropTarget(false)}
+                onDrop={dropImages}
+                className={imageDropTarget ? "image-drop-target" : undefined}
+              /> : <MarkdownPreview>{draft.body || "*This page is empty.*"}</MarkdownPreview>}
               {conflicts[selected.id] && <div className="document-conflict" role="alert">
                 <h3>This page changed while you were writing.</h3>
-                <p>Your draft is still above. Compare the latest saved page and merge any changes before saving.</p>
+                <p>Your draft is kept above. Compare and merge before saving.</p>
                 <button className="secondary-button" onClick={comparePage} disabled={Boolean(busy)}>Compare with saved page</button>
                 {conflicts[selected.id].latest && <>
                   <h4>Latest saved version: {conflicts[selected.id].latest.title}</h4>
                   <MarkdownPreview>{conflicts[selected.id].latest.body}</MarkdownPreview>
-                  <p>Using this version keeps your draft. Your next save will replace the latest page with your merged draft.</p>
+                  <p>Your draft stays as it is. Your next save replaces this version.</p>
                   <button className="secondary-button" onClick={useLatestVersion}>Use latest version for this draft</button>
                 </>}
               </div>}
-              <div className="editor-footnote">
-                Markdown wiki · {preview ? "Changes stay in this demo browser." : "Save page to share changes with your studio. Drafts remain in open tabs until saved."}
-                {!preview && selected.can_delete && <button className="secondary-button" onClick={removePage} disabled={Boolean(busy)}>Delete page</button>}
-              </div>
+              {!preview && selected.can_delete && <div className="editor-footnote">
+                <button className="secondary-button" onClick={removePage} disabled={Boolean(busy)}>Delete page</button>
+              </div>}
             </section>
           )}
           {view === "Documents" && selectedId && !selected && <p className="empty-state">This page is unavailable or has been deleted.<button className="secondary-button" onClick={() => go("Documents")}>All documents</button></p>}
           {view === "Reviews" && <Reviews reviews={data.reviews} selectedId={reviewId} onSelect={(id) => navigate("Reviews", null, id)} onUpdate={upsertReview} preview={preview} query={query} showForm={reviewForm} onCloseForm={() => setReviewForm(false)} />}
           {view === "Projects" && (
             <>
-              <div className="board-project-title">
-                <span className="project-emblem">◈</span>
-                <div>
-                  <h2>Studio project board</h2>
-                  <p>Shared tasks across studio projects</p>
-                </div>
-                <span className="pill">ACTIVE</span>
-              </div>
               <div className="kanban-board">
                 {statuses.map((status) => (
                   <section className="kanban-column" key={status}>

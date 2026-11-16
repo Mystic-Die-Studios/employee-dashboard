@@ -1,4 +1,5 @@
 import tempfile
+import uuid
 from unittest.mock import Mock, patch
 
 import requests
@@ -10,7 +11,7 @@ from rest_framework.test import APIClient
 
 from user_app.auth_utils import create_access_token
 from .github_service import sync_review
-from .models import ArtReview, Document, ReviewFeedback, Task
+from .models import ArtReview, Document, DocumentImage, ReviewFeedback, Task
 
 
 def art_file(name='concept.png', content=None):
@@ -125,6 +126,21 @@ class WorkspaceTests(TestCase):
         self.login(self.admin)
         self.assertEqual(self.client.delete(url).status_code, 204)
 
+    def test_document_folder_can_be_changed_by_any_member_but_not_blanked(self):
+        document = Document.objects.create(title='Lore', created_by=self.artist)
+        url = reverse('workspace_document', kwargs={'pk': document.id})
+        self.login(self.teammate)
+        response = self.client.patch(url, {'category': '  World building  ', 'version': 1}, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['category'], 'World building')
+        document.refresh_from_db()
+        self.assertEqual((document.category, document.version), ('World building', 2))
+        for bad in ['', '   ', 'x' * 81]:
+            with self.subTest(category=bad):
+                self.assertEqual(self.client.patch(url, {'category': bad, 'version': 2}, format='json').status_code, 400)
+        document.refresh_from_db()
+        self.assertEqual((document.category, document.version), ('World building', 2))
+
     def test_task_assignee_and_edit_permissions(self):
         response = self.client.post(reverse('workspace_tasks'), {'title': 'Paint character', 'priority': 'High'}, format='json')
         self.assertEqual(response.status_code, 201)
@@ -186,6 +202,120 @@ class WorkspaceTests(TestCase):
     def test_oversize_upload_is_rejected_before_storage(self):
         self.assertEqual(self.upload().status_code, 400)
         self.assertFalse(ArtReview.objects.exists())
+
+    def upload_wiki_image(self, file=None, **fields):
+        return self.client.post(reverse('workspace_document_images'), {'file': file or art_file('Map Sketch.png'), **fields}, format='multipart')
+
+    def test_wiki_image_upload_is_private_with_random_storage_name(self):
+        response = self.upload_wiki_image()
+        self.assertEqual(response.status_code, 201, response.data)
+        image = DocumentImage.objects.get(pk=response.data['id'])
+        self.assertEqual(response.data['url'], f"{reverse('workspace_document_images')}{image.id}/")
+        self.assertEqual(response.data['file_name'], 'Map Sketch.png')
+        self.assertIsNone(response.data['document'])
+        self.assertEqual(response['Cache-Control'], 'private, no-store')
+        self.assertEqual(image.uploaded_by, self.artist)
+        self.assertEqual(image.file_size, len(b'\x89PNG\r\n\x1a\nconcept-art'))
+        self.assertTrue(image.file.name.startswith('wiki-images/'))
+        self.assertTrue(image.file.name.endswith('.png'))
+        self.assertNotIn('Map', image.file.name)
+        self.assertTrue(image.file.storage.exists(image.file.name))
+
+    def test_wiki_image_accepts_every_supported_format_and_strips_client_paths(self):
+        for filename, content in [('a.jpg', b'\xff\xd8\xff\xe0'), ('b.jpeg', b'\xff\xd8\xff\xe1'), ('c.gif', b'GIF89a'), ('d.webp', b'RIFF\x00\x00\x00\x00WEBPVP8 '), ('C:\\Users\\artist\\e.png', b'\x89PNG\r\n\x1a\n')]:
+            with self.subTest(filename=filename):
+                response = self.upload_wiki_image(art_file(filename, content))
+                self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data['file_name'], 'e.png')
+
+    def test_wiki_image_can_link_to_a_page_and_survives_page_deletion(self):
+        document = Document.objects.create(title='Lore', created_by=self.artist)
+        response = self.upload_wiki_image(document=str(document.id))
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data['document'], str(document.id))
+        missing = self.upload_wiki_image(document='00000000-0000-0000-0000-000000000000')
+        self.assertEqual(missing.status_code, 400)
+        document.delete()
+        self.assertIsNone(DocumentImage.objects.get(pk=response.data['id']).document)
+
+    def test_wiki_image_rejects_non_images_scripts_and_disguised_files(self):
+        for filename, content in [('vector.svg', b'<svg onload=alert(1)>'), ('vector.svg.png', b'\x89PNG\r\n\x1a\n'), ('page.html.jpg', b'\xff\xd8\xff'), ('fake.png', b'<script>'), ('notes.pdf', b'%PDF-1.7'), ('scene.blend', b'BLENDER'), ('noextension', b'\x89PNG\r\n\x1a\n'), ('empty.png', b'')]:
+            with self.subTest(filename=filename):
+                response = self.upload_wiki_image(art_file(filename, content))
+                self.assertEqual(response.status_code, 400, response.data)
+        self.assertEqual(self.client.post(reverse('workspace_document_images'), {}, format='multipart').status_code, 400)
+        self.assertFalse(DocumentImage.objects.exists())
+
+    @override_settings(WIKI_IMAGE_MAX_BYTES=10, REVIEW_UPLOAD_MAX_BYTES=50 * 1024 * 1024)
+    def test_oversize_wiki_image_is_rejected_by_its_own_limit(self):
+        response = self.upload_wiki_image()
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('limit', str(response.data['file'][0]))
+        self.assertFalse(DocumentImage.objects.exists())
+
+    def test_wiki_image_upload_requires_authentication(self):
+        self.client.cookies.clear()
+        self.assertEqual(self.upload_wiki_image().status_code, 401)
+        self.assertFalse(DocumentImage.objects.exists())
+
+    def wiki_image_url(self, file=None):
+        response = self.upload_wiki_image(file)
+        self.assertEqual(response.status_code, 201, response.data)
+        return response.data['url']
+
+    def fetch(self, url):
+        response = self.client.get(url)
+        body = b''.join(response.streaming_content) if response.streaming else response.content
+        response.close()
+        return response, body
+
+    def test_wiki_image_is_served_inline_with_safety_and_cache_headers(self):
+        url = self.wiki_image_url()
+        self.assertEqual(url, reverse('workspace_document_image', kwargs={'pk': DocumentImage.objects.get().id}))
+        response, body = self.fetch(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(body, b'\x89PNG\r\n\x1a\nconcept-art')
+        self.assertEqual(response['Content-Type'], 'image/png')
+        self.assertTrue(response['Content-Disposition'].startswith('inline;'))
+        self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
+        self.assertEqual(response['Content-Security-Policy'], "default-src 'none'; sandbox")
+        self.assertEqual(response['Cross-Origin-Resource-Policy'], 'same-site')
+        self.assertEqual(response['Cache-Control'], 'private, max-age=86400')
+
+    def test_wiki_image_content_type_comes_from_stored_extension(self):
+        for filename, content, content_type in [('a.jpg', b'\xff\xd8\xff\xe0', 'image/jpeg'), ('b.jpeg', b'\xff\xd8\xff\xe1', 'image/jpeg'), ('c.gif', b'GIF89a', 'image/gif'), ('d.webp', b'RIFF\x00\x00\x00\x00WEBPVP8 ', 'image/webp')]:
+            with self.subTest(filename=filename):
+                response, body = self.fetch(self.wiki_image_url(art_file(filename, content)))
+                self.assertEqual(response['Content-Type'], content_type)
+                self.assertEqual(body, content)
+
+    def test_any_signed_in_member_can_view_another_members_wiki_image(self):
+        url = self.wiki_image_url()
+        self.login(self.teammate)
+        self.assertEqual(self.fetch(url)[0].status_code, 200)
+
+    def test_wiki_image_requires_authentication_and_errors_are_never_cached(self):
+        url = self.wiki_image_url()
+        self.client.cookies.clear()
+        response, body = self.fetch(url)
+        self.assertEqual(response.status_code, 401)
+        self.assertNotIn(b'concept-art', body)
+        self.assertEqual(response['Cache-Control'], 'private, no-store')
+        self.login(self.artist)
+        unknown, _ = self.fetch(reverse('workspace_document_image', kwargs={'pk': uuid.uuid4()}))
+        self.assertEqual(unknown.status_code, 404)
+        self.assertEqual(unknown['Cache-Control'], 'private, no-store')
+
+    def test_wiki_image_with_missing_file_or_unexpected_stored_type_is_not_found(self):
+        url = self.wiki_image_url()
+        image = DocumentImage.objects.get()
+        image.file.storage.delete(image.file.name)
+        self.assertEqual(self.fetch(url)[0].status_code, 404)
+        # Defense in depth: a row that somehow points at a non-image is never served.
+        image.file.save('legacy.svg', SimpleUploadedFile('legacy.svg', b'<svg onload=alert(1)>'), save=True)
+        response, body = self.fetch(url)
+        self.assertEqual(response.status_code, 404)
+        self.assertNotIn(b'<svg', body)
 
     def test_feedback_is_stored_and_only_admin_can_make_decisions(self):
         review = self.review()

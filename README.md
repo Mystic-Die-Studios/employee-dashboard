@@ -223,6 +223,7 @@ Copy `.env.example` to `.env` and fill in the following:
 | `REVIEW_GITHUB_TOKEN` | Server-only fine-grained token with Issues read/write for that repository |
 | `REVIEW_MEDIA_ROOT` | Private upload directory; defaults to `server/private_uploads`. Never serve publicly |
 | `REVIEW_UPLOAD_MAX_BYTES` | Upload limit, default `52428800` (50 MiB) |
+| `WIKI_IMAGE_MAX_BYTES` | Wiki image upload limit, default `10485760` (10 MiB) |
 
 For production values see [`deploy/env.production.example`](deploy/env.production.example)
 and [Deploying to cPanel](#deploying-to-cpanel).

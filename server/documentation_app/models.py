@@ -10,6 +10,11 @@ def review_upload_path(instance, filename):
     return f'reviews/{instance.id}/{uuid.uuid4().hex}{extension}'
 
 
+def wiki_image_upload_path(instance, filename):
+    extension = PurePath(filename).suffix.lower()
+    return f'wiki-images/{uuid.uuid4().hex}{extension}'
+
+
 class Document(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     title = models.CharField(max_length=200)
@@ -34,6 +39,23 @@ class Document(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class DocumentImage(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # Optional: an image can be inserted before a new page is first saved.
+    document = models.ForeignKey(Document, on_delete=models.SET_NULL, null=True, blank=True, related_name='images')
+    file = models.FileField(upload_to=wiki_image_upload_path, max_length=255)
+    file_name = models.CharField(max_length=200)
+    file_size = models.PositiveBigIntegerField()
+    uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='wiki_images')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return self.file_name
 
 
 class Task(models.Model):
